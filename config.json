@@ -17,8 +17,7 @@
   "debug": false,
   "input_mode": "postmsg",
   "execution_mode": "task_queue",
-  "auto_dpi_scale": false,
+  "auto_dpi_scale": true,
   "hotkey_enabled": true,
-  "hotkey_toggle": "── 功能键 ──",
-  "_target_hwnd": 0
+  "hotkey_toggle": "backspace"
 }

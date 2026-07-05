@@ -10,8 +10,8 @@ from typing import Optional
 
 from PyQt5.QtCore import QThread, pyqtSignal
 
-from config import BotConfig
-from main import SanguoBot
+from gameassistant.config import BotConfig
+from gameassistant.bot.core import SanguoBot
 
 
 class QtLogHandler(logging.Handler):
@@ -56,7 +56,7 @@ class BotWorker(QThread):
         self._handler: Optional[QtLogHandler] = None
 
     def run(self) -> None:
-        """线程入口：安装日志处理器 → 创建 SanguoBot → 运行主循环。
+        """线程入口：安装日志处理器 -> 创建 SanguoBot -> 运行主循环。
 
         日志处理器安装到 root logger，捕获所有模块的日志。
         线程结束时移除处理器，避免重复输出。
@@ -64,7 +64,9 @@ class BotWorker(QThread):
         # 安装 Qt 日志处理器
         self._handler = QtLogHandler(self.log_signal)
         self._handler.setFormatter(
-            logging.Formatter("%(asctime)s [%(levelname)s] %(name)s - %(message)s")
+            logging.Formatter(
+                "%(asctime)s [%(levelname)s] %(name)s - %(message)s"
+            )
         )
         root_logger = logging.getLogger()
         root_logger.addHandler(self._handler)

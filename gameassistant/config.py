@@ -9,8 +9,9 @@ import json
 import os
 from dataclasses import dataclass, field, asdict
 
-logger_dir = os.path.dirname(os.path.abspath(__file__))
-CONFIG_PATH = os.path.join(logger_dir, "config.json")
+# 项目根目录（config.json 始终位于仓库根目录）
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+CONFIG_PATH = os.path.join(_PROJECT_ROOT, "config.json")
 
 # ---------------------------------------------------------------------------
 # 虚拟键码映射表（供 GUI 显示与存储互转）
@@ -31,6 +32,7 @@ VK_MAP: dict[str, int] = {
     "Shift": 0x10,
     "Ctrl": 0x11,
     "Alt": 0x12,
+    "Backspace": 0x08,
     # 方向键
     "Left": 0x25,
     "Up": 0x26,
@@ -93,16 +95,16 @@ class BotConfig:
     debug: bool = False
     input_mode: str = "foreground"  # foreground / postmsg / focus
     execution_mode: str = "simple"  # simple / task_queue
-    auto_dpi_scale: bool = True  # 自适应屏幕DPI缩放（默认开启）
+    auto_dpi_scale: bool = True     # 自适应屏幕DPI缩放（默认开启）
 
     # 全局热键
-    hotkey_enabled: bool = True        # 是否启用全局热键
-    hotkey_toggle: str = "f12"         # 启动/停止切换热键（keyboard 库格式，小写）
+    hotkey_enabled: bool = True      # 是否启用全局热键
+    hotkey_toggle: str = "f12"       # 启动/停止切换热键（keyboard 库格式，小写）
 
     # 运行时标志：窗口标题热更新后需重新绑定 hwnd（不持久化）
-    _hwnd_dirty: bool = False
+    _hwnd_dirty: bool = field(default=False, compare=False, repr=False)
     # 运行时：用户手动选择的窗口句柄，0 表示自动按标题查找（不持久化）
-    _target_hwnd: int = 0
+    _target_hwnd: int = field(default=0, compare=False, repr=False)
 
     @property
     def loop_delay(self) -> tuple[float, float]:
@@ -126,16 +128,35 @@ class BotConfig:
         """
         if not os.path.exists(path):
             return cls()
+
+        # 预设合法字段名
+        valid_keys = {k for k in cls.__dataclass_fields__ if not k.startswith("_")}
+
         try:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            # 过滤掉非字段键（如运行时标志 _hwnd_dirty）
-            valid_keys = {k for k in cls.__dataclass_fields__ if not k.startswith("_")}
-            filtered = {k: v for k, v in data.items() if k in valid_keys}
+        except (json.JSONDecodeError, OSError):
+            return cls()
+
+        # 过滤：只保留合法的持久化字段
+        filtered = {}
+        for k, v in data.items():
+            if k in valid_keys:
+                filtered[k] = v
+
+        # 防御：修正明显损坏的热键值
+        if "hotkey_toggle" in filtered:
+            val = filtered["hotkey_toggle"]
+            if not val or "\u2500" in str(val) or not isinstance(val, str):
+                filtered["hotkey_toggle"] = "f12"
+
+        try:
             return cls(**filtered)
-        except (json.JSONDecodeError, TypeError, ValueError) as e:
+        except (TypeError, ValueError) as e:
             import logging
-            logging.getLogger(__name__).warning("配置文件解析失败，使用默认值: %s", e)
+            logging.getLogger(__name__).warning(
+                "配置文件字段不兼容，使用默认值: %s", e
+            )
             return cls()
 
     def save(self, path: str = CONFIG_PATH) -> None:
@@ -145,8 +166,10 @@ class BotConfig:
             path: 配置文件路径，默认为项目根目录下的 config.json。
         """
         data = asdict(self)
-        # 不持久化运行时标志
-        data.pop("_hwnd_dirty", None)
+        # 不持久化所有以 "_" 开头的运行时标志
+        keys_to_remove = [k for k in data if k.startswith("_")]
+        for k in keys_to_remove:
+            data.pop(k, None)
         with open(path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
 
@@ -175,6 +198,8 @@ class BotConfig:
         self.input_mode = other.input_mode
         self.execution_mode = other.execution_mode
         self.auto_dpi_scale = other.auto_dpi_scale
+        self.hotkey_enabled = other.hotkey_enabled
+        self.hotkey_toggle = other.hotkey_toggle
         self._hwnd_dirty = True
 
     # ------------------------------------------------------------------

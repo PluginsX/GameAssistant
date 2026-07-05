@@ -5,7 +5,7 @@
     {
       "name": "攻击",
       "enabled": true,
-      "repeat": 1,
+      "repeat": 3,
       "events": [
         {
           "type": "keyclick",
@@ -147,7 +147,7 @@
     },
     {
       "name": "批量拾取",
-      "enabled": false,
+      "enabled": true,
       "repeat": 1,
       "events": [
         {

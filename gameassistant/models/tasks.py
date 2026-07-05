@@ -17,11 +17,11 @@ import random
 from dataclasses import dataclass, field
 from typing import Optional
 
-# 复用 config 中的按键映射
-from config import VK_MAP, name_to_vk, vk_to_name
+from gameassistant.config import name_to_vk
 
-# 默认任务队列配置文件路径（项目根目录）
-TASK_QUEUE_CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "TaskConfig.json")
+# 项目根目录（TaskConfig.json 始终位于仓库根目录）
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+TASK_QUEUE_CONFIG_PATH = os.path.join(_PROJECT_ROOT, "TaskConfig.json")
 
 
 @dataclass
@@ -77,15 +77,15 @@ class TaskEvent:
     def get_display_text(self) -> str:
         """返回用于 UI 显示的简短文本。"""
         if self.type == "keydown":
-            return f"↓ {self.key}"
+            return f"\u2193 {self.key}"
         elif self.type == "keyup":
-            return f"↑ {self.key}"
+            return f"\u2191 {self.key}"
         elif self.type == "keyclick":
-            return f"↕ {self.key}"
+            return f"\u2195 {self.key}"
         elif self.type == "wait":
-            return f"⏱ {self.ms}ms"
+            return f"\u23F1 {self.ms}ms"
         elif self.type == "wait_random":
-            return f"⏱ ~{self.min_ms}-{self.max_ms}ms"
+            return f"\u23F1 ~{self.min_ms}-{self.max_ms}ms"
         return "?"
 
     def get_color(self) -> str:

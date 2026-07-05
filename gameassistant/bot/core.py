@@ -1,22 +1,9 @@
-"""QQ三国挂机脚本主程序。
+"""Bot 核心引擎。
 
-状态机驱动的主循环，整合 window（窗口操作）模块，
-实现自动按键和任务队列执行。窗口失焦/被遮挡时仍可运行，最小化时自动暂停。
-
-用法：
-    1. 激活虚拟环境：f:\\Project\\Game\\sanguo\\venv\\Scripts\\Activate.ps1
-    2. 运行：python main.py
-    3. 按 Ctrl+C 优雅退出
-
-调试模式（显示画面预览）：
-    python main.py --debug
-
-配置文件：config.json（不存在则使用默认值），由 GUI 编辑或手动维护。
-
-双入口：python gui.py 启动图形化配置控制台。
+状态机驱动的主循环，整合窗口操作模块，
+实现自动按键和任务队列执行。
 """
 
-import argparse
 import logging
 import random
 import time
@@ -25,9 +12,11 @@ from typing import Callable, Optional
 
 from PIL import Image
 
-import window
-from config import BotConfig
-from task_queue import TaskQueue
+from gameassistant.config import BotConfig
+from gameassistant.models.tasks import TaskQueue
+from gameassistant.platform.window_win import (
+    get_hwnd, is_minimized, send_key, send_key_down, send_key_up, capture_window,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +47,7 @@ class SanguoBot:
             self.hwnd = config._target_hwnd
             logger.info("使用手动选择的窗口句柄: %s", self.hwnd)
         else:
-            self.hwnd = window.get_hwnd(config.window_title)
+            self.hwnd = get_hwnd(config.window_title)
         # 根据执行模式决定初始状态
         if config.execution_mode == "task_queue":
             self.state = BotState.TASK_QUEUE
@@ -68,7 +57,6 @@ class SanguoBot:
         self.frame_callback = frame_callback  # 调试帧回调 (QImage) -> None
         self._tick_count = 0  # 用于帧降频
         # 测试按键队列：GUI 端调用 request_test_key 追加，_tick 中消费
-        # list.append / list.pop(0) 在 GIL 保护下线程安全
         self._test_key_queue: list[int] = []
         # 任务队列（由 GUI 设置）
         self.task_queue: Optional[TaskQueue] = None
@@ -78,10 +66,12 @@ class SanguoBot:
     def run(self) -> None:
         """主循环入口，捕获 Ctrl+C 优雅退出。"""
         if not self.hwnd:
-            logger.error("未找到游戏窗口 '%s'，请确认游戏已启动且窗口标题正确", self.config.window_title)
+            logger.error("未找到游戏窗口 '%s'，请确认游戏已启动且窗口标题正确",
+                         self.config.window_title)
             return
 
-        logger.info("脚本启动，窗口句柄: %s，调试模式: %s", self.hwnd, self.config.debug)
+        logger.info("脚本启动，窗口句柄: %s，调试模式: %s",
+                    self.hwnd, self.config.debug)
         try:
             while self._running:
                 self._tick()
@@ -102,7 +92,7 @@ class SanguoBot:
         mode = self.config.input_mode
         for vk in list(self._pressed_keys):
             try:
-                window.send_key_up(self.hwnd, vk, mode=mode)
+                send_key_up(self.hwnd, vk, mode=mode)
             except Exception as e:
                 logger.warning("释放按键 0x%02X 失败: %s", vk, e)
         self._pressed_keys.clear()
@@ -134,20 +124,21 @@ class SanguoBot:
         while self._test_key_queue:
             vk = self._test_key_queue.pop(0)
             logger.info("测试按键已发送: 0x%02X", vk)
-            window.send_key(self.hwnd, vk, mode=self.config.input_mode)
+            send_key(self.hwnd, vk, mode=self.config.input_mode)
 
         # 热更新窗口标题：检测 dirty 标志，重新获取 hwnd
         if self.config._hwnd_dirty:
             self.config._hwnd_dirty = False
-            new_hwnd = window.get_hwnd(self.config.window_title)
+            new_hwnd = get_hwnd(self.config.window_title)
             if new_hwnd:
                 self.hwnd = new_hwnd
                 logger.info("窗口标题变更，重新获取句柄: %s", new_hwnd)
             else:
-                logger.warning("窗口标题变更后未找到窗口: %s", self.config.window_title)
+                logger.warning("窗口标题变更后未找到窗口: %s",
+                             self.config.window_title)
 
         # 每轮先检测最小化状态（守护逻辑）
-        if window.is_minimized(self.hwnd):
+        if is_minimized(self.hwnd):
             if self.state != BotState.PAUSED:
                 logger.warning("窗口已最小化，脚本暂停。请恢复窗口以继续。")
                 self.state = BotState.PAUSED
@@ -166,12 +157,15 @@ class SanguoBot:
 
         # 调试可视化：每 3 轮截图发送到 GUI
         if self.config.debug and self.frame_callback and self._tick_count % 3 == 0:
-            img = window.capture_window(self.hwnd)
+            img = capture_window(self.hwnd)
             if img and img.size != (1, 1):
                 w, h = img.size
                 scale = min(500 / w, 1.0)
                 if scale < 1.0:
-                    preview = img.resize((int(w * scale), int(h * scale)), Image.Resampling.LANCZOS)
+                    preview = img.resize(
+                        (int(w * scale), int(h * scale)),
+                        Image.Resampling.LANCZOS
+                    )
                 else:
                     preview = img
                 self.frame_callback(preview, [], [])
@@ -190,14 +184,7 @@ class SanguoBot:
     # ------------------------------------------------------------------
 
     def _handle_key_loop(self) -> None:
-        """纯按键循环模式：不依赖图像识别，按配置循环发送技能/拾取键。
-
-        典型场景：把角色放在怪物刷新点，让脚本持续按技能键攻击、按拾取键捡装备。
-        - enable_key_loop=False 时不发送任何按键（仅作占位）
-        - enable_pickup=False 时只发技能键，不发拾取键
-        - attack_rounds 控制每轮技能循环次数
-        - attack_keys 为空时只发送拾取键（不攻击）
-        """
+        """纯按键循环模式：按配置循环发送技能/拾取键。"""
         if not self.config.enable_key_loop:
             return  # 按键循环未启用，空转等待
 
@@ -207,21 +194,17 @@ class SanguoBot:
                 for key in self.config.attack_keys:
                     logger.debug("按键循环 (轮次 %d/%d, 键码 0x%02X)",
                                 rnd + 1, self.config.attack_rounds, key)
-                    window.send_key(self.hwnd, key, mode=self.config.input_mode)
+                    send_key(self.hwnd, key, mode=self.config.input_mode)
                     time.sleep(random.uniform(*self.config.attack_delay))
 
         # 穿插发送拾取键（仅在启用拾取时）
         if self.config.enable_pickup:
             logger.debug("按键循环 拾取 (键码 0x%02X)", self.config.pickup_key)
-            window.send_key(self.hwnd, self.config.pickup_key, mode=self.config.input_mode)
+            send_key(self.hwnd, self.config.pickup_key, mode=self.config.input_mode)
             time.sleep(random.uniform(0.3, 0.6))
 
     def _handle_task_queue(self) -> None:
-        """任务队列模式：按顺序执行任务队列中的所有事件。
-
-        每个任务按其 repeat 次数重复执行。
-        若 loop_forever 为 True，整个队列执行完后从头开始。
-        """
+        """任务队列模式：按顺序执行任务队列中的所有事件。"""
         if self.task_queue is None:
             logger.warning("任务队列为空，请先在编辑器中创建任务")
             return
@@ -234,7 +217,8 @@ class SanguoBot:
         mode = self.config.input_mode
         for task in enabled_tasks:
             for rnd in range(task.repeat):
-                logger.info("执行任务: %s (轮次 %d/%d)", task.name, rnd + 1, task.repeat)
+                logger.info("执行任务: %s (轮次 %d/%d)",
+                           task.name, rnd + 1, task.repeat)
                 for event in task.events:
                     if not self._running:
                         return
@@ -247,27 +231,27 @@ class SanguoBot:
                     etype = event.type
                     if etype == "keydown":
                         vk = event.vk_code
-                        logger.debug("  ↓ %s", event.key)
-                        window.send_key_down(self.hwnd, vk, mode=mode)
+                        logger.debug("  \u2193 %s", event.key)
+                        send_key_down(self.hwnd, vk, mode=mode)
                         self._pressed_keys.add(vk)
                     elif etype == "keyup":
                         vk = event.vk_code
-                        logger.debug("  ↑ %s", event.key)
-                        window.send_key_up(self.hwnd, vk, mode=mode)
+                        logger.debug("  \u2191 %s", event.key)
+                        send_key_up(self.hwnd, vk, mode=mode)
                         self._pressed_keys.discard(vk)
                     elif etype == "keyclick":
                         vk = event.vk_code
-                        logger.debug("  ↕ %s", event.key)
-                        window.send_key(self.hwnd, vk, mode=mode)
+                        logger.debug("  \u2195 %s", event.key)
+                        send_key(self.hwnd, vk, mode=mode)
                     elif etype == "wait":
-                        logger.debug("  ⏱ 等待 %dms", event.ms)
+                        logger.debug("  \u23F1 等待 %dms", event.ms)
                         time.sleep(event.ms / 1000.0)
                     elif etype == "wait_random":
                         wait_s = random.uniform(event.min_ms, event.max_ms) / 1000.0
-                        logger.debug("  ⏱ 随机等待 %.0fms", wait_s * 1000)
+                        logger.debug("  \u23F1 随机等待 %.0fms", wait_s * 1000)
                         time.sleep(wait_s)
 
-                    # 最小动作间隔（仅对按键类事件生效，等待类事件不加）
+                    # 最小动作间隔（仅对按键类事件生效）
                     if etype in ("keydown", "keyup", "keyclick"):
                         interval_ms = self.task_queue.get_action_interval_ms()
                         if interval_ms > 0:
@@ -278,30 +262,3 @@ class SanguoBot:
         else:
             logger.info("任务队列执行完毕（非循环模式）")
             self._running = False
-
-def main() -> None:
-    """程序入口：加载 config.json 并启动脚本。"""
-    parser = argparse.ArgumentParser(description="QQ三国后台挂机脚本")
-    parser.add_argument("--debug", action="store_true", help="开启调试可视化窗口")
-    parser.add_argument("--title", default=None, help="游戏窗口标题（覆盖 config.json）")
-    args = parser.parse_args()
-
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
-    )
-
-    # 加载配置文件（不存在则使用默认值）
-    config = BotConfig.load()
-    if args.title:
-        config.window_title = args.title
-    if args.debug:
-        config.debug = True
-
-    # 启动脚本
-    bot = SanguoBot(config)
-    bot.run()
-
-
-if __name__ == "__main__":
-    main()
