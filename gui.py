@@ -25,7 +25,6 @@ from contextlib import contextmanager
 _ENABLE_DPI_SCALE = True
 if sys.platform == "win32":
     try:
-        # 尝试在 Qt 初始化前提取 DPI 配置
         if os.path.exists("config.json"):
             with open("config.json", "r", encoding="utf-8") as f:
                 _cfg = json.load(f)
@@ -35,11 +34,9 @@ if sys.platform == "win32":
         pass
 
     if _ENABLE_DPI_SCALE:
-        # 开启 Qt 级别的高清自适应缩放（界面清晰，字体锐利）
         os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
         os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
     else:
-        # 关闭缩放，强制由 Windows DWM 进行全局拉伸（界面可能会发虚）
         os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "0"
         os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "0"
         try:
@@ -58,7 +55,6 @@ def dpi_unaware_context():
         try:
             user32 = ctypes.windll.user32
             if hasattr(user32, 'SetThreadDpiAwarenessContext'):
-                # DPI_AWARENESS_CONTEXT_UNAWARE = -1 (c_void_p(-1))
                 old_ctx = user32.SetThreadDpiAwarenessContext(ctypes.c_void_p(-1))
         except Exception:
             pass
@@ -72,7 +68,7 @@ def dpi_unaware_context():
                 pass
 
 
-from PyQt5.QtCore import Qt, pyqtSignal, QObject, QTimer, QRect
+from PyQt5.QtCore import Qt, pyqtSignal, QObject, QTimer, QRect, QSize
 from PyQt5.QtGui import QCursor, QFont, QImage, QPixmap, QTextCursor, QPainter, QPen, QColor
 from PyQt5.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDoubleSpinBox,
@@ -138,21 +134,44 @@ BORDER_WIDTH = 6
 
 
 # ---------------------------------------------------------------------------
-# 预览控件
+# 预览控件 (完美等比例自适应高度版本)
 # ---------------------------------------------------------------------------
 class PreviewWidget(QWidget):
-    """等比例居中、不裁剪的实时画面预览控件。"""
+    """宽度随窗口变化，高度自动根据游戏画面比例调整的预览控件。"""
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setMinimumSize(200, 150)
-        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        # 宽度 Expanding 撑满布局，高度 Preferred 以匹配 heightForWidth 建议值
+        policy = QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        policy.setHeightForWidth(True)
+        self.setSizePolicy(policy)
         self.setStyleSheet("PreviewWidget { background: #0a0a0a; border: none; }")
+        
         self._qimage = QImage()
         self._error_text: str | None = None
+        self._aspect_ratio = 16.0 / 9.0  # 默认无图时的宽高比
+
+    def hasHeightForWidth(self):
+        return True
+
+    def heightForWidth(self, width: int) -> int:
+        return int(width / self._aspect_ratio)
+
+    def sizeHint(self):
+        w = self.width() if self.width() > 0 else 400
+        return QSize(w, int(w / self._aspect_ratio))
 
     def set_image(self, qimage: QImage):
         self._qimage = qimage
         self._error_text = None
+        
+        # 获取最新的真实比例并更新布局
+        if not qimage.isNull() and qimage.height() > 0:
+            new_ratio = qimage.width() / qimage.height()
+            # 只有当比例确实发生变化时才更新布局尺寸，避免无限重绘抖动
+            if abs(new_ratio - self._aspect_ratio) > 0.01:
+                self._aspect_ratio = new_ratio
+                self.updateGeometry() # 触发高度重新计算
+                
         self.update()
 
     def set_error(self, message: str):
@@ -917,8 +936,8 @@ class MainWindow(QMainWindow):
 
         layout.addLayout(top_row)
 
+        # 移除了 setMinimumHeight，高度会根据比例和当前宽度自动推导计算
         self._preview_widget = PreviewWidget()
-        self._preview_widget.setMinimumHeight(250)
         layout.addWidget(self._preview_widget, 1)
 
     def _build_log_into(self, layout: QVBoxLayout):
