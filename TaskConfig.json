@@ -1,0 +1,450 @@
+{
+  "version": 1,
+  "loop_forever": true,
+  "tasks": [
+    {
+      "name": "攻击",
+      "enabled": true,
+      "repeat": 1,
+      "events": [
+        {
+          "type": "keyclick",
+          "key": "W"
+        },
+        {
+          "type": "keyclick",
+          "key": "A"
+        },
+        {
+          "type": "keyclick",
+          "key": "C"
+        },
+        {
+          "type": "keyclick",
+          "key": "A"
+        },
+        {
+          "type": "keyclick",
+          "key": "C"
+        },
+        {
+          "type": "keyclick",
+          "key": "A"
+        },
+        {
+          "type": "keyclick",
+          "key": "C"
+        },
+        {
+          "type": "keyclick",
+          "key": "A"
+        },
+        {
+          "type": "keyclick",
+          "key": "C"
+        },
+        {
+          "type": "keyclick",
+          "key": "A"
+        },
+        {
+          "type": "keyclick",
+          "key": "W"
+        },
+        {
+          "type": "keyclick",
+          "key": "A"
+        },
+        {
+          "type": "keyclick",
+          "key": "C"
+        },
+        {
+          "type": "keyclick",
+          "key": "A"
+        },
+        {
+          "type": "keyclick",
+          "key": "C"
+        },
+        {
+          "type": "keyclick",
+          "key": "A"
+        },
+        {
+          "type": "keyclick",
+          "key": "C"
+        },
+        {
+          "type": "keyclick",
+          "key": "A"
+        },
+        {
+          "type": "keyclick",
+          "key": "C"
+        },
+        {
+          "type": "keyclick",
+          "key": "A"
+        },
+        {
+          "type": "keyclick",
+          "key": "C"
+        },
+        {
+          "type": "keyclick",
+          "key": "S"
+        },
+        {
+          "type": "keyclick",
+          "key": "C"
+        },
+        {
+          "type": "keyclick",
+          "key": "W"
+        },
+        {
+          "type": "keyclick",
+          "key": "D"
+        },
+        {
+          "type": "keyclick",
+          "key": "C"
+        },
+        {
+          "type": "keyclick",
+          "key": "E"
+        },
+        {
+          "type": "keyclick",
+          "key": "C"
+        },
+        {
+          "type": "keyclick",
+          "key": "F"
+        },
+        {
+          "type": "keyclick",
+          "key": "C"
+        },
+        {
+          "type": "keyclick",
+          "key": "Q"
+        },
+        {
+          "type": "keyclick",
+          "key": "C"
+        },
+        {
+          "type": "keyclick",
+          "key": "Q"
+        },
+        {
+          "type": "keyclick",
+          "key": "C"
+        }
+      ]
+    },
+    {
+      "name": "批量拾取",
+      "enabled": false,
+      "repeat": 1,
+      "events": [
+        {
+          "type": "keyclick",
+          "key": "C"
+        },
+        {
+          "type": "keyclick",
+          "key": "R"
+        },
+        {
+          "type": "keyclick",
+          "key": "T"
+        },
+        {
+          "type": "keydown",
+          "key": "Right"
+        },
+        {
+          "type": "wait",
+          "ms": 100
+        },
+        {
+          "type": "keyclick",
+          "key": "C"
+        },
+        {
+          "type": "keyclick",
+          "key": "R"
+        },
+        {
+          "type": "keyclick",
+          "key": "T"
+        },
+        {
+          "type": "keydown",
+          "key": "Right"
+        },
+        {
+          "type": "wait",
+          "ms": 100
+        },
+        {
+          "type": "keyclick",
+          "key": "C"
+        },
+        {
+          "type": "keyclick",
+          "key": "R"
+        },
+        {
+          "type": "keyclick",
+          "key": "T"
+        },
+        {
+          "type": "keydown",
+          "key": "Right"
+        },
+        {
+          "type": "wait",
+          "ms": 100
+        },
+        {
+          "type": "keyclick",
+          "key": "C"
+        },
+        {
+          "type": "keyclick",
+          "key": "R"
+        },
+        {
+          "type": "keyclick",
+          "key": "T"
+        },
+        {
+          "type": "keydown",
+          "key": "Right"
+        },
+        {
+          "type": "wait",
+          "ms": 100
+        },
+        {
+          "type": "keyclick",
+          "key": "C"
+        },
+        {
+          "type": "keyclick",
+          "key": "R"
+        },
+        {
+          "type": "keyclick",
+          "key": "T"
+        },
+        {
+          "type": "keydown",
+          "key": "Right"
+        },
+        {
+          "type": "wait",
+          "ms": 100
+        },
+        {
+          "type": "keyclick",
+          "key": "C"
+        },
+        {
+          "type": "keyclick",
+          "key": "R"
+        },
+        {
+          "type": "keyclick",
+          "key": "T"
+        },
+        {
+          "type": "keydown",
+          "key": "Right"
+        },
+        {
+          "type": "wait",
+          "ms": 100
+        },
+        {
+          "type": "keyclick",
+          "key": "C"
+        },
+        {
+          "type": "keyclick",
+          "key": "R"
+        },
+        {
+          "type": "keyclick",
+          "key": "T"
+        },
+        {
+          "type": "keydown",
+          "key": "Right"
+        },
+        {
+          "type": "wait",
+          "ms": 100
+        },
+        {
+          "type": "keyclick",
+          "key": "C"
+        },
+        {
+          "type": "keyclick",
+          "key": "R"
+        },
+        {
+          "type": "keyclick",
+          "key": "T"
+        },
+        {
+          "type": "keydown",
+          "key": "Right"
+        },
+        {
+          "type": "wait",
+          "ms": 100
+        },
+        {
+          "type": "keyclick",
+          "key": "C"
+        },
+        {
+          "type": "keyclick",
+          "key": "R"
+        },
+        {
+          "type": "keyclick",
+          "key": "T"
+        },
+        {
+          "type": "keydown",
+          "key": "Left"
+        },
+        {
+          "type": "wait",
+          "ms": 100
+        },
+        {
+          "type": "keyclick",
+          "key": "C"
+        },
+        {
+          "type": "keyclick",
+          "key": "R"
+        },
+        {
+          "type": "keyclick",
+          "key": "T"
+        },
+        {
+          "type": "keydown",
+          "key": "Left"
+        },
+        {
+          "type": "wait",
+          "ms": 100
+        },
+        {
+          "type": "keyclick",
+          "key": "Space"
+        },
+        {
+          "type": "wait",
+          "ms": 100
+        },
+        {
+          "type": "keyclick",
+          "key": "Space"
+        },
+        {
+          "type": "wait",
+          "ms": 100
+        },
+        {
+          "type": "keyclick",
+          "key": "Space"
+        },
+        {
+          "type": "wait",
+          "ms": 100
+        }
+      ]
+    },
+    {
+      "name": "随意走走",
+      "enabled": false,
+      "repeat": 1,
+      "events": [
+        {
+          "type": "keydown",
+          "key": "Right"
+        },
+        {
+          "type": "wait",
+          "ms": 500
+        },
+        {
+          "type": "keyup",
+          "key": "Right"
+        },
+        {
+          "type": "wait_random",
+          "min": 150,
+          "max": 300
+        },
+        {
+          "type": "keyclick",
+          "key": "Space"
+        },
+        {
+          "type": "wait_random",
+          "min": 150,
+          "max": 300
+        },
+        {
+          "type": "keydown",
+          "key": "Left"
+        },
+        {
+          "type": "wait",
+          "ms": 500
+        },
+        {
+          "type": "keyup",
+          "key": "Left"
+        }
+      ]
+    },
+    {
+      "name": "任务 4",
+      "enabled": false,
+      "repeat": 1,
+      "events": [
+        {
+          "type": "keyclick",
+          "key": "A"
+        },
+        {
+          "type": "keyclick",
+          "key": "S"
+        },
+        {
+          "type": "keyclick",
+          "key": "D"
+        }
+      ]
+    }
+  ],
+  "block_actions_enabled": true,
+  "blocked_actions": [],
+  "min_action_interval": 300,
+  "min_action_interval_random": true,
+  "min_action_interval_min": 100,
+  "min_action_interval_max": 200
+}

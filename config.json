@@ -1,0 +1,24 @@
+{
+  "enable_key_loop": true,
+  "enable_pickup": true,
+  "window_title": "QQ三国",
+  "attack_keys": [
+    65,
+    87,
+    69,
+    83
+  ],
+  "pickup_key": 67,
+  "loop_delay_min": 0.5,
+  "loop_delay_max": 1.0,
+  "attack_delay_min": 0.0,
+  "attack_delay_max": 0.8,
+  "attack_rounds": 1,
+  "debug": false,
+  "input_mode": "postmsg",
+  "execution_mode": "task_queue",
+  "auto_dpi_scale": false,
+  "hotkey_enabled": true,
+  "hotkey_toggle": "── 功能键 ──",
+  "_target_hwnd": 0
+}
