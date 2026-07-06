@@ -5,7 +5,7 @@
     {
       "name": "攻击",
       "enabled": true,
-      "repeat": 3,
+      "repeat": 5,
       "events": [
         {
           "type": "keyclick",
@@ -83,12 +83,16 @@
           "key": "C"
         },
         {
-          "type": "keyclick",
-          "key": "R"
+          "type": "keydown",
+          "key": "Right"
+        },
+        {
+          "type": "wait",
+          "ms": 100
         },
         {
           "type": "keyclick",
-          "key": "T"
+          "key": "C"
         },
         {
           "type": "keydown",
@@ -103,12 +107,16 @@
           "key": "C"
         },
         {
-          "type": "keyclick",
-          "key": "R"
+          "type": "keydown",
+          "key": "Right"
+        },
+        {
+          "type": "wait",
+          "ms": 100
         },
         {
           "type": "keyclick",
-          "key": "T"
+          "key": "C"
         },
         {
           "type": "keydown",
@@ -123,12 +131,16 @@
           "key": "C"
         },
         {
-          "type": "keyclick",
-          "key": "R"
+          "type": "keydown",
+          "key": "Right"
+        },
+        {
+          "type": "wait",
+          "ms": 100
         },
         {
           "type": "keyclick",
-          "key": "T"
+          "key": "C"
         },
         {
           "type": "keydown",
@@ -143,14 +155,6 @@
           "key": "C"
         },
         {
-          "type": "keyclick",
-          "key": "R"
-        },
-        {
-          "type": "keyclick",
-          "key": "T"
-        },
-        {
           "type": "keydown",
           "key": "Right"
         },
@@ -163,14 +167,6 @@
           "key": "C"
         },
         {
-          "type": "keyclick",
-          "key": "R"
-        },
-        {
-          "type": "keyclick",
-          "key": "T"
-        },
-        {
           "type": "keydown",
           "key": "Right"
         },
@@ -181,74 +177,6 @@
         {
           "type": "keyclick",
           "key": "C"
-        },
-        {
-          "type": "keyclick",
-          "key": "R"
-        },
-        {
-          "type": "keyclick",
-          "key": "T"
-        },
-        {
-          "type": "keydown",
-          "key": "Right"
-        },
-        {
-          "type": "wait",
-          "ms": 100
-        },
-        {
-          "type": "keyclick",
-          "key": "C"
-        },
-        {
-          "type": "keyclick",
-          "key": "R"
-        },
-        {
-          "type": "keyclick",
-          "key": "T"
-        },
-        {
-          "type": "keydown",
-          "key": "Right"
-        },
-        {
-          "type": "wait",
-          "ms": 100
-        },
-        {
-          "type": "keyclick",
-          "key": "C"
-        },
-        {
-          "type": "keyclick",
-          "key": "R"
-        },
-        {
-          "type": "keyclick",
-          "key": "T"
-        },
-        {
-          "type": "keydown",
-          "key": "Right"
-        },
-        {
-          "type": "wait",
-          "ms": 100
-        },
-        {
-          "type": "keyclick",
-          "key": "C"
-        },
-        {
-          "type": "keyclick",
-          "key": "R"
-        },
-        {
-          "type": "keyclick",
-          "key": "T"
         },
         {
           "type": "keydown",
@@ -261,14 +189,6 @@
         {
           "type": "keyclick",
           "key": "C"
-        },
-        {
-          "type": "keyclick",
-          "key": "R"
-        },
-        {
-          "type": "keyclick",
-          "key": "T"
         },
         {
           "type": "keydown",
@@ -306,7 +226,7 @@
     },
     {
       "name": "随意走走",
-      "enabled": false,
+      "enabled": true,
       "repeat": 1,
       "events": [
         {
@@ -314,8 +234,44 @@
           "key": "Right"
         },
         {
-          "type": "wait",
-          "ms": 500
+          "type": "keyclick",
+          "key": "C"
+        },
+        {
+          "type": "keyclick",
+          "key": "C"
+        },
+        {
+          "type": "keyclick",
+          "key": "C"
+        },
+        {
+          "type": "keyclick",
+          "key": "C"
+        },
+        {
+          "type": "keyclick",
+          "key": "C"
+        },
+        {
+          "type": "keyclick",
+          "key": "C"
+        },
+        {
+          "type": "keyclick",
+          "key": "C"
+        },
+        {
+          "type": "keyclick",
+          "key": "C"
+        },
+        {
+          "type": "keyclick",
+          "key": "C"
+        },
+        {
+          "type": "keyclick",
+          "key": "C"
         },
         {
           "type": "keyup",
@@ -331,12 +287,48 @@
           "key": "Left"
         },
         {
-          "type": "wait",
-          "ms": 500
+          "type": "keyclick",
+          "key": "C"
+        },
+        {
+          "type": "keyclick",
+          "key": "C"
+        },
+        {
+          "type": "keyclick",
+          "key": "C"
+        },
+        {
+          "type": "keyclick",
+          "key": "C"
+        },
+        {
+          "type": "keyclick",
+          "key": "C"
+        },
+        {
+          "type": "keyclick",
+          "key": "C"
+        },
+        {
+          "type": "keyclick",
+          "key": "C"
+        },
+        {
+          "type": "keyclick",
+          "key": "C"
+        },
+        {
+          "type": "keyclick",
+          "key": "C"
         },
         {
           "type": "keyup",
           "key": "Left"
+        },
+        {
+          "type": "keyclick",
+          "key": "C"
         }
       ]
     },
