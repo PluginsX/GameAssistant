@@ -9,67 +9,7 @@
       "events": [
         {
           "type": "keyclick",
-          "key": "W"
-        },
-        {
-          "type": "keyclick",
-          "key": "A"
-        },
-        {
-          "type": "keyclick",
-          "key": "C"
-        },
-        {
-          "type": "keyclick",
-          "key": "A"
-        },
-        {
-          "type": "keyclick",
-          "key": "C"
-        },
-        {
-          "type": "keyclick",
-          "key": "A"
-        },
-        {
-          "type": "keyclick",
-          "key": "C"
-        },
-        {
-          "type": "keyclick",
-          "key": "A"
-        },
-        {
-          "type": "keyclick",
-          "key": "C"
-        },
-        {
-          "type": "keyclick",
-          "key": "A"
-        },
-        {
-          "type": "keyclick",
-          "key": "W"
-        },
-        {
-          "type": "keyclick",
-          "key": "A"
-        },
-        {
-          "type": "keyclick",
-          "key": "C"
-        },
-        {
-          "type": "keyclick",
-          "key": "A"
-        },
-        {
-          "type": "keyclick",
-          "key": "C"
-        },
-        {
-          "type": "keyclick",
-          "key": "A"
+          "key": "E"
         },
         {
           "type": "keyclick",
@@ -101,19 +41,7 @@
         },
         {
           "type": "keyclick",
-          "key": "W"
-        },
-        {
-          "type": "keyclick",
           "key": "D"
-        },
-        {
-          "type": "keyclick",
-          "key": "C"
-        },
-        {
-          "type": "keyclick",
-          "key": "E"
         },
         {
           "type": "keyclick",
@@ -137,7 +65,7 @@
         },
         {
           "type": "keyclick",
-          "key": "Q"
+          "key": "W"
         },
         {
           "type": "keyclick",
@@ -147,7 +75,7 @@
     },
     {
       "name": "批量拾取",
-      "enabled": true,
+      "enabled": false,
       "repeat": 1,
       "events": [
         {
@@ -399,15 +327,6 @@
           "max": 300
         },
         {
-          "type": "keyclick",
-          "key": "Space"
-        },
-        {
-          "type": "wait_random",
-          "min": 150,
-          "max": 300
-        },
-        {
           "type": "keydown",
           "key": "Left"
         },
@@ -428,23 +347,29 @@
       "events": [
         {
           "type": "keyclick",
-          "key": "A"
+          "key": "R"
         },
         {
           "type": "keyclick",
-          "key": "S"
+          "key": "C"
         },
         {
           "type": "keyclick",
-          "key": "D"
+          "key": "T"
+        },
+        {
+          "type": "keyclick",
+          "key": "C"
         }
       ]
     }
   ],
   "block_actions_enabled": true,
-  "blocked_actions": [],
+  "blocked_actions": [
+    "Space:keyclick"
+  ],
   "min_action_interval": 300,
   "min_action_interval_random": true,
   "min_action_interval_min": 100,
-  "min_action_interval_max": 200
+  "min_action_interval_max": 198
 }

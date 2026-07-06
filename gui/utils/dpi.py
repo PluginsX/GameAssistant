@@ -34,9 +34,12 @@ def dpi_unaware_context():
 
 def _get_config_path() -> str:
     """获取 config.json 的绝对路径（项目根目录下）。"""
-    utils_dir = os.path.dirname(os.path.abspath(__file__))
-    gui_dir = os.path.dirname(utils_dir)
-    project_root = os.path.dirname(gui_dir)
+    if getattr(sys, "frozen", False):
+        project_root = os.path.dirname(sys.executable)
+    else:
+        utils_dir = os.path.dirname(os.path.abspath(__file__))
+        gui_dir = os.path.dirname(utils_dir)
+        project_root = os.path.dirname(gui_dir)
     return os.path.join(project_root, "config.json")
 
 

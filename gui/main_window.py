@@ -1168,12 +1168,15 @@ class MainWindow(QMainWindow):
         self.dpi_scale_check.blockSignals(False)
 
         self.hotkey_checkbox.setChecked(self.config.hotkey_enabled)
-        hotkey_val = self.config.hotkey_toggle.upper()
-        idx = self.hotkey_combo.findData(hotkey_val)
-        if idx >= 0:
-            self.hotkey_combo.setCurrentIndex(idx)
-        else:
-            self.hotkey_combo.setCurrentText(hotkey_val)
+        hotkey_lower = self.config.hotkey_toggle.lower()
+        found_idx = -1
+        for i in range(self.hotkey_combo.count()):
+            data = self.hotkey_combo.itemData(i)
+            if data and isinstance(data, str) and data.lower() == hotkey_lower:
+                found_idx = i
+                break
+        if found_idx >= 0:
+            self.hotkey_combo.setCurrentIndex(found_idx)
         if self.config.hotkey_enabled:
             self._setup_hotkey()
 

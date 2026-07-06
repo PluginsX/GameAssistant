@@ -18,10 +18,9 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 from gameassistant.config import name_to_vk
+from gameassistant.paths import get_task_config_path
 
-# 项目根目录（TaskConfig.json 始终位于仓库根目录）
-_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-TASK_QUEUE_CONFIG_PATH = os.path.join(_PROJECT_ROOT, "TaskConfig.json")
+TASK_QUEUE_CONFIG_PATH = get_task_config_path()
 
 
 @dataclass

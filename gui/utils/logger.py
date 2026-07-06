@@ -5,14 +5,18 @@
 
 import logging
 import os
+import sys
 from datetime import datetime
 
 
 def get_log_dir() -> str:
     """获取日志目录路径（项目根目录下的 log 文件夹）。"""
-    utils_dir = os.path.dirname(os.path.abspath(__file__))
-    gui_dir = os.path.dirname(utils_dir)
-    project_root = os.path.dirname(gui_dir)
+    if getattr(sys, "frozen", False):
+        project_root = os.path.dirname(sys.executable)
+    else:
+        utils_dir = os.path.dirname(os.path.abspath(__file__))
+        gui_dir = os.path.dirname(utils_dir)
+        project_root = os.path.dirname(gui_dir)
     log_dir = os.path.join(project_root, "log")
     os.makedirs(log_dir, exist_ok=True)
     return log_dir

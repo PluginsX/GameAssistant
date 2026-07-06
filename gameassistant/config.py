@@ -9,9 +9,9 @@ import json
 import os
 from dataclasses import dataclass, field, asdict
 
-# 项目根目录（config.json 始终位于仓库根目录）
-_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CONFIG_PATH = os.path.join(_PROJECT_ROOT, "config.json")
+from gameassistant.paths import get_config_path
+
+CONFIG_PATH = get_config_path()
 
 # ---------------------------------------------------------------------------
 # 虚拟键码映射表（供 GUI 显示与存储互转）

@@ -135,3 +135,23 @@ def build_restore_icon(color: str | None = None) -> QIcon:
 def build_minimize_icon(color: str | None = None) -> QIcon:
     icon = _load_svg_icon("minimize.svg", color)
     return icon if icon else _make_fallback_icon(_fallback_minimize, QColor(color) if color else None)
+
+
+def get_app_icon_path() -> str:
+    """获取主程序图标文件的绝对路径。
+
+    图标位于 gui/resources/icons/ico.ico，
+    支持 PyInstaller 打包后的运行环境（_MEIPASS）。
+    """
+    import sys
+    if hasattr(sys, "_MEIPASS"):
+        base = sys._MEIPASS
+    elif getattr(sys, "frozen", False):
+        base = os.path.dirname(sys.executable)
+    else:
+        base = os.path.dirname(os.path.abspath(__file__))
+    icon_path = os.path.join(base, "ico.ico")
+    if os.path.exists(icon_path):
+        return icon_path
+    icon_path = os.path.join(base, "icons", "ico.ico")
+    return icon_path

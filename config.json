@@ -17,7 +17,7 @@
   "debug": false,
   "input_mode": "postmsg",
   "execution_mode": "task_queue",
-  "auto_dpi_scale": true,
+  "auto_dpi_scale": false,
   "hotkey_enabled": true,
   "hotkey_toggle": "backspace"
 }
