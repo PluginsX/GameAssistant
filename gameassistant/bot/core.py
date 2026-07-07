@@ -85,6 +85,28 @@ class SanguoBot:
         """请求停止主循环。"""
         self._running = False
 
+    def _interruptible_sleep(self, seconds: float) -> bool:
+        """可中断睡眠：每 0.1s 轮询检查 _running 标志。
+
+        相比 time.sleep，该方法支持毫秒级的停止响应，
+        避免长时间 sleep 阻塞 stop() 请求。
+
+        Args:
+            seconds: 总睡眠秒数。
+
+        Returns:
+            True 表示正常完成，False 表示因 _running=False 被中断。
+        """
+        elapsed = 0.0
+        step = 0.1
+        while elapsed < seconds:
+            if not self._running:
+                return False
+            remaining = seconds - elapsed
+            time.sleep(min(step, remaining))
+            elapsed += step
+        return True
+
     def _release_all_keys(self) -> None:
         """释放所有已按下的键（防止卡键）。"""
         if not self._pressed_keys:
@@ -142,7 +164,7 @@ class SanguoBot:
             if self.state != BotState.PAUSED:
                 logger.warning("窗口已最小化，脚本暂停。请恢复窗口以继续。")
                 self.state = BotState.PAUSED
-            time.sleep(2.0)  # 暂停时降低轮询频率
+            self._interruptible_sleep(2.0)  # 暂停时降低轮询频率 + 可中断
             return
 
         if self.state == BotState.PAUSED:
@@ -177,7 +199,7 @@ class SanguoBot:
             self._handle_task_queue()
 
         # 主循环随机延迟
-        time.sleep(random.uniform(*self.config.loop_delay))
+        self._interruptible_sleep(random.uniform(*self.config.loop_delay))
 
     # ------------------------------------------------------------------
     # 状态处理
@@ -191,17 +213,22 @@ class SanguoBot:
         # 循环发送技能键（若为空则跳过）
         if self.config.attack_keys:
             for rnd in range(self.config.attack_rounds):
+                if not self._running:
+                    return
                 for key in self.config.attack_keys:
+                    if not self._running:
+                        return
                     logger.debug("按键循环 (轮次 %d/%d, 键码 0x%02X)",
                                 rnd + 1, self.config.attack_rounds, key)
                     send_key(self.hwnd, key, mode=self.config.input_mode)
-                    time.sleep(random.uniform(*self.config.attack_delay))
+                    if not self._interruptible_sleep(random.uniform(*self.config.attack_delay)):
+                        return
 
         # 穿插发送拾取键（仅在启用拾取时）
-        if self.config.enable_pickup:
+        if self.config.enable_pickup and self._running:
             logger.debug("按键循环 拾取 (键码 0x%02X)", self.config.pickup_key)
             send_key(self.hwnd, self.config.pickup_key, mode=self.config.input_mode)
-            time.sleep(random.uniform(0.3, 0.6))
+            self._interruptible_sleep(random.uniform(0.3, 0.6))
 
     def _handle_task_queue(self) -> None:
         """任务队列模式：按顺序执行任务队列中的所有事件。"""
@@ -216,7 +243,11 @@ class SanguoBot:
 
         mode = self.config.input_mode
         for task in enabled_tasks:
+            if not self._running:
+                return
             for rnd in range(task.repeat):
+                if not self._running:
+                    return
                 logger.info("执行任务: %s (轮次 %d/%d)",
                            task.name, rnd + 1, task.repeat)
                 for event in task.events:
@@ -245,17 +276,20 @@ class SanguoBot:
                         send_key(self.hwnd, vk, mode=mode)
                     elif etype == "wait":
                         logger.debug("  \u23F1 等待 %dms", event.ms)
-                        time.sleep(event.ms / 1000.0)
+                        if not self._interruptible_sleep(event.ms / 1000.0):
+                            return
                     elif etype == "wait_random":
                         wait_s = random.uniform(event.min_ms, event.max_ms) / 1000.0
                         logger.debug("  \u23F1 随机等待 %.0fms", wait_s * 1000)
-                        time.sleep(wait_s)
+                        if not self._interruptible_sleep(wait_s):
+                            return
 
                     # 最小动作间隔（仅对按键类事件生效）
                     if etype in ("keydown", "keyup", "keyclick"):
                         interval_ms = self.task_queue.get_action_interval_ms()
                         if interval_ms > 0:
-                            time.sleep(interval_ms / 1000.0)
+                            if not self._interruptible_sleep(interval_ms / 1000.0):
+                                return
 
         if self.task_queue.loop_forever:
             logger.debug("任务队列一轮完成，循环继续")

@@ -1268,7 +1268,11 @@ class MainWindow(QMainWindow):
     def _restart_app(self):
         if self.worker is not None and self.worker.isRunning():
             self.worker.stop()
-            self.worker.wait(3000)
+            finished = self.worker.wait(5000)
+            if not finished:
+                logging.warning("重启时工作线程超时未退出，强制终止")
+                self.worker.terminate()
+                self.worker.wait(2000)
             self.worker = None
         self._hotkey_mgr.unhook()
 
@@ -1324,7 +1328,16 @@ class MainWindow(QMainWindow):
     def on_stop(self) -> None:
         if self.worker is not None:
             self.worker.stop()
-            self.worker.wait(3000)
+            finished = self.worker.wait(5000)
+            if not finished:
+                # 5秒后仍未退出，强制终止线程
+                logging.warning("工作线程超时未退出，强制终止")
+                self.worker.terminate()
+                self.worker.wait(2000)
+                # 释放可能按住的键（强制终止后 send_key_up 不可用，
+                # 但 _release_all_keys 的异常会被捕获）
+                if self.worker.bot is not None:
+                    self.worker.bot._release_all_keys()
             self.worker = None
         self.start_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
