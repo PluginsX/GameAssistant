@@ -3,365 +3,100 @@
   "loop_forever": true,
   "tasks": [
     {
-      "name": "攻击",
+      "name": "任务 1",
       "enabled": true,
-      "repeat": 5,
-      "events": [
-        {
-          "type": "keyclick",
-          "key": "E"
-        },
-        {
-          "type": "keyclick",
-          "key": "C"
-        },
-        {
-          "type": "keyclick",
-          "key": "A"
-        },
-        {
-          "type": "keyclick",
-          "key": "C"
-        },
-        {
-          "type": "keyclick",
-          "key": "A"
-        },
-        {
-          "type": "keyclick",
-          "key": "C"
-        },
-        {
-          "type": "keyclick",
-          "key": "S"
-        },
-        {
-          "type": "keyclick",
-          "key": "C"
-        },
-        {
-          "type": "keyclick",
-          "key": "D"
-        },
-        {
-          "type": "keyclick",
-          "key": "C"
-        },
-        {
-          "type": "keyclick",
-          "key": "F"
-        },
-        {
-          "type": "keyclick",
-          "key": "C"
-        },
-        {
-          "type": "keyclick",
-          "key": "Q"
-        },
-        {
-          "type": "keyclick",
-          "key": "C"
-        },
-        {
-          "type": "keyclick",
-          "key": "W"
-        },
-        {
-          "type": "keyclick",
-          "key": "C"
-        }
-      ]
-    },
-    {
-      "name": "批量拾取",
-      "enabled": false,
+      "task_type": "independent",
       "repeat": 1,
       "events": [
         {
           "type": "keyclick",
-          "key": "C"
-        },
-        {
-          "type": "keydown",
-          "key": "Right"
-        },
-        {
-          "type": "wait",
-          "ms": 100
+          "keys": [
+            "Alt",
+            "W"
+          ]
         },
         {
           "type": "keyclick",
-          "key": "C"
-        },
-        {
-          "type": "keydown",
-          "key": "Right"
-        },
-        {
-          "type": "wait",
-          "ms": 100
+          "keys": [
+            "Alt",
+            "E"
+          ]
         },
         {
           "type": "keyclick",
-          "key": "C"
-        },
-        {
-          "type": "keydown",
-          "key": "Right"
-        },
-        {
-          "type": "wait",
-          "ms": 100
-        },
-        {
-          "type": "keyclick",
-          "key": "C"
-        },
-        {
-          "type": "keydown",
-          "key": "Right"
-        },
-        {
-          "type": "wait",
-          "ms": 100
-        },
-        {
-          "type": "keyclick",
-          "key": "C"
-        },
-        {
-          "type": "keydown",
-          "key": "Right"
-        },
-        {
-          "type": "wait",
-          "ms": 100
-        },
-        {
-          "type": "keyclick",
-          "key": "C"
-        },
-        {
-          "type": "keydown",
-          "key": "Right"
-        },
-        {
-          "type": "wait",
-          "ms": 100
-        },
-        {
-          "type": "keyclick",
-          "key": "C"
-        },
-        {
-          "type": "keydown",
-          "key": "Right"
-        },
-        {
-          "type": "wait",
-          "ms": 100
-        },
-        {
-          "type": "keyclick",
-          "key": "C"
-        },
-        {
-          "type": "keydown",
-          "key": "Right"
-        },
-        {
-          "type": "wait",
-          "ms": 100
-        },
-        {
-          "type": "keyclick",
-          "key": "C"
-        },
-        {
-          "type": "keydown",
-          "key": "Left"
-        },
-        {
-          "type": "wait",
-          "ms": 100
-        },
-        {
-          "type": "keyclick",
-          "key": "C"
-        },
-        {
-          "type": "keydown",
-          "key": "Left"
-        },
-        {
-          "type": "wait",
-          "ms": 100
-        },
-        {
-          "type": "keyclick",
-          "key": "Space"
-        },
-        {
-          "type": "wait",
-          "ms": 100
-        },
-        {
-          "type": "keyclick",
-          "key": "Space"
-        },
-        {
-          "type": "wait",
-          "ms": 100
-        },
-        {
-          "type": "keyclick",
-          "key": "Space"
-        },
-        {
-          "type": "wait",
-          "ms": 100
+          "keys": [
+            "C"
+          ]
         }
       ]
     },
     {
-      "name": "随意走走",
+      "name": "任务 2",
       "enabled": true,
-      "repeat": 1,
-      "events": [
-        {
-          "type": "keydown",
-          "key": "Right"
-        },
-        {
-          "type": "keyclick",
-          "key": "C"
-        },
-        {
-          "type": "keyclick",
-          "key": "C"
-        },
-        {
-          "type": "keyclick",
-          "key": "C"
-        },
-        {
-          "type": "keyclick",
-          "key": "C"
-        },
-        {
-          "type": "keyclick",
-          "key": "C"
-        },
-        {
-          "type": "keyclick",
-          "key": "C"
-        },
-        {
-          "type": "keyclick",
-          "key": "C"
-        },
-        {
-          "type": "keyclick",
-          "key": "C"
-        },
-        {
-          "type": "keyclick",
-          "key": "C"
-        },
-        {
-          "type": "keyclick",
-          "key": "C"
-        },
-        {
-          "type": "keyup",
-          "key": "Right"
-        },
-        {
-          "type": "wait_random",
-          "min": 150,
-          "max": 300
-        },
-        {
-          "type": "keydown",
-          "key": "Left"
-        },
-        {
-          "type": "keyclick",
-          "key": "C"
-        },
-        {
-          "type": "keyclick",
-          "key": "C"
-        },
-        {
-          "type": "keyclick",
-          "key": "C"
-        },
-        {
-          "type": "keyclick",
-          "key": "C"
-        },
-        {
-          "type": "keyclick",
-          "key": "C"
-        },
-        {
-          "type": "keyclick",
-          "key": "C"
-        },
-        {
-          "type": "keyclick",
-          "key": "C"
-        },
-        {
-          "type": "keyclick",
-          "key": "C"
-        },
-        {
-          "type": "keyclick",
-          "key": "C"
-        },
-        {
-          "type": "keyup",
-          "key": "Left"
-        },
-        {
-          "type": "keyclick",
-          "key": "C"
-        }
-      ]
-    },
-    {
-      "name": "任务 4",
-      "enabled": false,
+      "task_type": "sequential",
       "repeat": 1,
       "events": [
         {
           "type": "keyclick",
-          "key": "R"
+          "keys": [
+            "A"
+          ]
         },
         {
           "type": "keyclick",
-          "key": "C"
+          "keys": [
+            "S"
+          ]
         },
         {
           "type": "keyclick",
-          "key": "T"
+          "keys": [
+            "D"
+          ]
         },
         {
           "type": "keyclick",
-          "key": "C"
+          "keys": [
+            "F"
+          ]
+        },
+        {
+          "type": "keyclick",
+          "keys": [
+            "Q"
+          ]
+        },
+        {
+          "type": "keyclick",
+          "keys": [
+            "W"
+          ]
+        },
+        {
+          "type": "keyclick",
+          "keys": [
+            "E"
+          ]
+        },
+        {
+          "type": "keyclick",
+          "keys": [
+            "R"
+          ]
+        },
+        {
+          "type": "keyclick",
+          "keys": [
+            "T"
+          ]
         }
       ]
     }
   ],
-  "block_actions_enabled": true,
-  "blocked_actions": [
-    "Space:keyclick"
-  ],
-  "min_action_interval": 300,
-  "min_action_interval_random": true,
+  "block_actions_enabled": false,
+  "blocked_actions": [],
+  "min_action_interval": 200,
+  "min_action_interval_random": false,
   "min_action_interval_min": 100,
-  "min_action_interval_max": 198
+  "min_action_interval_max": 300
 }

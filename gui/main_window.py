@@ -80,7 +80,9 @@ class MainWindow(QMainWindow):
         self._preview_capturing = False
 
         self._task_queue: TaskQueue | None = None
-        self._selected_task_index: int = -1
+        self._selected_type: str = "sequential"
+        self._selected_seq_index: int = -1
+        self._selected_ind_index: int = -1
         self._hotkey_mgr = HotkeyManager()
         self._hotkey_signal_connected = False
 
@@ -391,9 +393,10 @@ class MainWindow(QMainWindow):
         top_row.addWidget(QLabel("截图方案:"))
         self._capture_method_combo = QComboBox()
         self._capture_method_combo.addItems(
-            ["BitBlt+GetDC（客户区）", "BitBlt+WindowDC（完整窗口）"]
+            ["PrintWindow（屏幕分辨率）", "PrintWindow+全内容（渲染分辨率）",
+             "BitBlt+GetDC（客户区）", "BitBlt+WindowDC（完整窗口）"]
         )
-        self._capture_method_combo.setCurrentText("BitBlt+GetDC（客户区）")
+        self._capture_method_combo.setCurrentText("PrintWindow（屏幕分辨率）")
         self._capture_method_combo.setFixedWidth(220)
         top_row.addWidget(self._capture_method_combo)
         top_row.addSpacing(10)
@@ -493,34 +496,70 @@ class MainWindow(QMainWindow):
 
         left_col = QVBoxLayout()
         left_col.setSpacing(4)
-        left_label = QLabel("任务列表")
-        left_label.setStyleSheet(
+
+        # ------------------- 顺序任务列表 -------------------
+        seq_header = QHBoxLayout()
+        seq_header.setSpacing(4)
+        seq_label = QLabel("顺序任务")
+        seq_label.setStyleSheet(
             "color: #6b8cff; font-size: 13px; font-weight: 600;"
         )
-        left_col.addWidget(left_label)
+        seq_header.addWidget(seq_label)
+        btn_add_seq = QPushButton("+")
+        btn_add_seq.setFixedWidth(24)
+        btn_add_seq.clicked.connect(lambda: self._on_add_task("sequential"))
+        seq_header.addWidget(btn_add_seq)
+        btn_del_seq = QPushButton("\u00D7")
+        btn_del_seq.setFixedWidth(24)
+        btn_del_seq.clicked.connect(self._on_del_task)
+        seq_header.addWidget(btn_del_seq)
+        seq_header.addStretch()
+        left_col.addLayout(seq_header)
 
-        self.task_list = QListWidget()
-        self.task_list.setSelectionMode(QListWidget.SingleSelection)
-        self.task_list.setFixedWidth(180)
-        self.task_list.currentRowChanged.connect(self._on_task_selected)
-        left_col.addWidget(self.task_list, 1)
+        self.seq_task_list = QListWidget()
+        self.seq_task_list.setSelectionMode(QListWidget.SingleSelection)
+        self.seq_task_list.setMinimumWidth(140)
+        self.seq_task_list.currentRowChanged.connect(
+            lambda r: self._on_list_selected(r, "sequential")
+        )
+        left_col.addWidget(self.seq_task_list, 1)
 
-        task_btn_row = QHBoxLayout()
-        task_btn_row.setSpacing(4)
-        btn_add_task = QPushButton("+")
-        btn_add_task.setFixedWidth(28)
-        btn_add_task.clicked.connect(self._on_add_task)
-        btn_del_task = QPushButton("\u00D7")
-        btn_del_task.setFixedWidth(28)
-        btn_del_task.clicked.connect(self._on_del_task)
-        btn_rename_task = QPushButton("\u270E")
-        btn_rename_task.setFixedWidth(28)
-        btn_rename_task.clicked.connect(self._on_rename_task)
-        task_btn_row.addWidget(btn_add_task)
-        task_btn_row.addWidget(btn_del_task)
-        task_btn_row.addWidget(btn_rename_task)
-        task_btn_row.addStretch()
-        left_col.addLayout(task_btn_row)
+        # ------------------- 独立任务列表 -------------------
+        ind_header = QHBoxLayout()
+        ind_header.setSpacing(4)
+        ind_label = QLabel("独立任务")
+        ind_label.setStyleSheet(
+            "color: #f59e0b; font-size: 13px; font-weight: 600;"
+        )
+        ind_header.addWidget(ind_label)
+        btn_add_ind = QPushButton("+")
+        btn_add_ind.setFixedWidth(24)
+        btn_add_ind.clicked.connect(lambda: self._on_add_task("independent"))
+        ind_header.addWidget(btn_add_ind)
+        btn_del_ind = QPushButton("\u00D7")
+        btn_del_ind.setFixedWidth(24)
+        btn_del_ind.clicked.connect(self._on_del_task)
+        ind_header.addWidget(btn_del_ind)
+        ind_header.addStretch()
+        left_col.addLayout(ind_header)
+
+        self.ind_task_list = QListWidget()
+        self.ind_task_list.setSelectionMode(QListWidget.SingleSelection)
+        self.ind_task_list.setMinimumWidth(140)
+        self.ind_task_list.currentRowChanged.connect(
+            lambda r: self._on_list_selected(r, "independent")
+        )
+        left_col.addWidget(self.ind_task_list, 1)
+
+        # ------------------- 共有属性 -------------------
+        rename_btn = QPushButton("\u270E 重命名")
+        rename_btn.clicked.connect(self._on_rename_task)
+        rename_btn.setStyleSheet(
+            "QPushButton { background: #3a3a3a; color: #d0d0d0; border: none; "
+            "border-radius: 4px; padding: 4px 8px; font-size: 12px; } "
+            "QPushButton:hover { background: #4a4a4a; color: #f0f0f0; }"
+        )
+        left_col.addWidget(rename_btn)
 
         repeat_row = QHBoxLayout()
         repeat_row.addWidget(QLabel("重复:"))
@@ -528,8 +567,20 @@ class MainWindow(QMainWindow):
         self.repeat_spin.setRange(1, 999)
         self.repeat_spin.valueChanged.connect(self._on_repeat_changed)
         repeat_row.addWidget(self.repeat_spin)
+        repeat_row.addStretch()
         left_col.addLayout(repeat_row)
-        panel_layout.addLayout(left_col)
+
+        type_row = QHBoxLayout()
+        type_row.addWidget(QLabel("类型:"))
+        self._task_type_combo = QComboBox()
+        self._task_type_combo.addItem("顺序", "sequential")
+        self._task_type_combo.addItem("独立", "independent")
+        self._task_type_combo.currentIndexChanged.connect(self._on_task_type_changed)
+        type_row.addWidget(self._task_type_combo)
+        type_row.addStretch()
+        left_col.addLayout(type_row)
+
+        panel_layout.addLayout(left_col, 1)
 
         mid_col = QVBoxLayout()
         mid_col.setSpacing(4)
@@ -551,9 +602,33 @@ class MainWindow(QMainWindow):
         right_col.addWidget(right_label)
 
         right_col.addWidget(QLabel("按键:"))
-        self.block_key_combo = QComboBox()
-        _populate_key_combo(self.block_key_combo)
-        right_col.addWidget(self.block_key_combo)
+        self._key1_combo = QComboBox()
+        _populate_key_combo(self._key1_combo)
+        key_row = QHBoxLayout()
+        key_row.setSpacing(2)
+        key_row.addWidget(self._key1_combo)
+
+        plus1 = QLabel("+")
+        plus1.setStyleSheet("color: #888; font-size: 13px; font-weight: 700; padding: 0 2px;")
+        plus1.setFixedWidth(14)
+        key_row.addWidget(plus1)
+
+        self._key2_combo = QComboBox()
+        _populate_key_combo(self._key2_combo)
+        self._key2_combo.setPlaceholderText("")
+        key_row.addWidget(self._key2_combo)
+
+        plus2 = QLabel("+")
+        plus2.setStyleSheet("color: #888; font-size: 13px; font-weight: 700; padding: 0 2px;")
+        plus2.setFixedWidth(14)
+        key_row.addWidget(plus2)
+
+        self._key3_combo = QComboBox()
+        _populate_key_combo(self._key3_combo)
+        key_row.addWidget(self._key3_combo)
+
+        key_row.addStretch()
+        right_col.addLayout(key_row)
 
         btn_block_down = QPushButton("\u2193 按下")
         btn_block_down.setStyleSheet(
@@ -625,7 +700,7 @@ class MainWindow(QMainWindow):
         btn_block_wait.clicked.connect(self._on_add_wait_event)
         right_col.addWidget(btn_block_wait)
         right_col.addStretch()
-        panel_layout.addLayout(right_col)
+        panel_layout.addLayout(right_col, 1)
         layout.addWidget(panel)
 
         interval_frame = QFrame()
@@ -755,59 +830,145 @@ class MainWindow(QMainWindow):
     # 任务相关方法
     # ------------------------------------------------------------------
 
+    def _get_seq_indices(self) -> list[int]:
+        """返回 tasks 列表中所有顺序类型任务的索引。"""
+        if self._task_queue is None:
+            return []
+        return [i for i, t in enumerate(self._task_queue.tasks)
+                if t.task_type == "sequential"]
+
+    def _get_ind_indices(self) -> list[int]:
+        """返回 tasks 列表中所有独立类型任务的索引。"""
+        if self._task_queue is None:
+            return []
+        return [i for i, t in enumerate(self._task_queue.tasks)
+                if t.task_type == "independent"]
+
     def _get_selected_task(self) -> Task | None:
         if self._task_queue is None:
             return None
-        if 0 <= self._selected_task_index < len(self._task_queue.tasks):
-            return self._task_queue.tasks[self._selected_task_index]
+        if self._selected_type == "sequential":
+            idx = self._selected_seq_index
+        else:
+            idx = self._selected_ind_index
+        if 0 <= idx < len(self._task_queue.tasks):
+            return self._task_queue.tasks[idx]
         return None
 
     def _refresh_task_list(self):
-        prev_index = self._selected_task_index
-        self.task_list.clear()
+        """刷新顺序任务列表和独立任务列表。"""
         if self._task_queue is None:
-            self._selected_task_index = -1
+            self._selected_seq_index = -1
+            self._selected_ind_index = -1
+            self.seq_task_list.clear()
+            self.ind_task_list.clear()
             self.event_list.clear()
             return
-        for i, task in enumerate(self._task_queue.tasks):
+
+        # 刷新顺序列表
+        seq_indices = self._get_seq_indices()
+        self.seq_task_list.blockSignals(True)
+        self.seq_task_list.clear()
+        for vi, fi in enumerate(seq_indices):
+            t = self._task_queue.tasks[fi]
             item = QListWidgetItem()
-            widget = TaskItemWidget(task, i, self.task_list, self)
-            self.task_list.addItem(item)
-            self.task_list.setItemWidget(item, widget)
+            widget = TaskItemWidget(t, vi, self.seq_task_list, self, "sequential")
+            self.seq_task_list.addItem(item)
+            self.seq_task_list.setItemWidget(item, widget)
             item.setSizeHint(widget.sizeHint())
-        if self._task_queue.tasks:
-            if 0 <= prev_index < len(self._task_queue.tasks):
-                self.task_list.setCurrentRow(prev_index)
-            else:
-                self.task_list.setCurrentRow(0)
-        else:
-            self._selected_task_index = -1
+        self.seq_task_list.blockSignals(False)
+
+        # 刷新独立列表
+        ind_indices = self._get_ind_indices()
+        self.ind_task_list.blockSignals(True)
+        self.ind_task_list.clear()
+        for vi, fi in enumerate(ind_indices):
+            t = self._task_queue.tasks[fi]
+            item = QListWidgetItem()
+            widget = TaskItemWidget(t, vi, self.ind_task_list, self, "independent")
+            self.ind_task_list.addItem(item)
+            self.ind_task_list.setItemWidget(item, widget)
+            item.setSizeHint(widget.sizeHint())
+        self.ind_task_list.blockSignals(False)
+
+        # 恢复选中状态
+        if self._selected_seq_index >= 0 and self._selected_seq_index in seq_indices:
+            self.seq_task_list.setCurrentRow(seq_indices.index(self._selected_seq_index))
+        if self._selected_ind_index >= 0 and self._selected_ind_index in ind_indices:
+            self.ind_task_list.setCurrentRow(ind_indices.index(self._selected_ind_index))
+
+        # 如果两个列表都空了，清空事件列表
+        if not seq_indices and not ind_indices:
+            self._selected_seq_index = -1
+            self._selected_ind_index = -1
             self.event_list.clear()
 
-    def _on_task_selected(self, row: int):
-        if row < 0 or self._task_queue is None or row >= len(self._task_queue.tasks):
-            self._selected_task_index = -1
-            self.event_list.clear()
+    def _on_list_selected(self, view_row: int, task_type: str):
+        """任务列表项被选中时的回调。
+
+        Args:
+            view_row: 在对应列表中的视图索引（-1 表示取消选中）。
+            task_type: "sequential" 或 "independent"。
+        """
+        if view_row < 0 or self._task_queue is None:
             return
-        if row == self._selected_task_index:
-            return
-        self._selected_task_index = row
-        task = self._task_queue.tasks[row]
+
+        if task_type == "sequential":
+            indices = self._get_seq_indices()
+            if view_row >= len(indices):
+                return
+            fi = indices[view_row]
+            self._selected_type = "sequential"
+            self._selected_seq_index = fi
+        else:
+            indices = self._get_ind_indices()
+            if view_row >= len(indices):
+                return
+            fi = indices[view_row]
+            self._selected_type = "independent"
+            self._selected_ind_index = fi
+
+        task = self._task_queue.tasks[fi]
         self.event_list.refresh_events(task)
         self.repeat_spin.setValue(task.repeat)
 
-    def _on_add_task(self):
+        idx = self._task_type_combo.findData(task.task_type)
+        if idx >= 0:
+            self._task_type_combo.blockSignals(True)
+            self._task_type_combo.setCurrentIndex(idx)
+            self._task_type_combo.blockSignals(False)
+
+    def _on_add_task(self, task_type: str = "sequential"):
+        """添加新任务到指定类型列表。"""
         if self._task_queue is None:
             self._task_queue = TaskQueue.create_default()
-        task = Task(name=f"任务 {len(self._task_queue.tasks) + 1}")
-        self._task_queue.tasks.append(task)
+            # 确保默认任务类型正确
+            if self._task_queue.tasks:
+                self._task_queue.tasks[0].task_type = task_type
+        else:
+            task = Task(name=f"任务 {len(self._task_queue.tasks) + 1}",
+                        task_type=task_type)
+            self._task_queue.tasks.append(task)
         self._refresh_task_list()
-        self.task_list.setCurrentRow(len(self._task_queue.tasks) - 1)
+
+        # 选中新添加的任务
+        if task_type == "sequential":
+            indices = self._get_seq_indices()
+            if indices:
+                self.seq_task_list.setCurrentRow(len(indices) - 1)
+        else:
+            indices = self._get_ind_indices()
+            if indices:
+                self.ind_task_list.setCurrentRow(len(indices) - 1)
 
     def _on_del_task(self):
+        """删除当前选中的任务。"""
         if self._task_queue is None:
             return
-        idx = self.task_list.currentRow()
+        if self._selected_type == "sequential":
+            idx = self._selected_seq_index
+        else:
+            idx = self._selected_ind_index
         if idx < 0 or idx >= len(self._task_queue.tasks):
             return
         reply = QMessageBox.question(
@@ -815,11 +976,13 @@ class MainWindow(QMainWindow):
             f"删除任务 '{self._task_queue.tasks[idx].name}'？"
         )
         if reply == QMessageBox.Yes:
+            old_type = self._task_queue.tasks[idx].task_type
             self._task_queue.tasks.pop(idx)
+            if old_type == "sequential":
+                self._selected_seq_index = -1
+            else:
+                self._selected_ind_index = -1
             self._refresh_task_list()
-            if self._task_queue.tasks:
-                new_idx = min(idx, len(self._task_queue.tasks) - 1)
-                self.task_list.setCurrentRow(new_idx)
 
     def _on_rename_task(self):
         task = self._get_selected_task()
@@ -831,14 +994,40 @@ class MainWindow(QMainWindow):
         if ok and new_name.strip():
             task.name = new_name.strip()
             self._refresh_task_list()
-            self.task_list.setCurrentRow(self._selected_task_index)
+            if self._selected_type == "sequential":
+                indices = self._get_seq_indices()
+                if self._selected_seq_index in indices:
+                    self.seq_task_list.setCurrentRow(
+                        indices.index(self._selected_seq_index))
+            else:
+                indices = self._get_ind_indices()
+                if self._selected_ind_index in indices:
+                    self.ind_task_list.setCurrentRow(
+                        indices.index(self._selected_ind_index))
 
     def _on_repeat_changed(self, value: int):
         task = self._get_selected_task()
         if task:
             task.repeat = value
             self._refresh_task_list()
-            self.task_list.setCurrentRow(self._selected_task_index)
+
+    def _on_task_type_changed(self, idx: int):
+        """修改当前选中任务的类型（顺序 ↔ 独立）。"""
+        task = self._get_selected_task()
+        if not task:
+            return
+        new_type = self._task_type_combo.itemData(idx)
+        if new_type and new_type != task.task_type:
+            task.task_type = new_type
+            if new_type == "sequential":
+                self._selected_type = "sequential"
+                self._selected_seq_index = self._get_seq_indices()[-1]
+                self._selected_ind_index = -1
+            else:
+                self._selected_type = "independent"
+                self._selected_ind_index = self._get_ind_indices()[-1]
+                self._selected_seq_index = -1
+            self._refresh_task_list()
 
     def _on_import_tasks(self):
         from PyQt5.QtWidgets import QFileDialog
@@ -848,16 +1037,35 @@ class MainWindow(QMainWindow):
         if not file_path:
             return
         try:
-            self._task_queue = TaskQueue.load(file_path)
-            self._selected_task_index = 0 if self._task_queue.tasks else -1
+            self._task_queue, warnings = TaskQueue.load_safe(file_path)
+            self._selected_seq_index = -1
+            self._selected_ind_index = -1
+            self._selected_type = "sequential"
             self._refresh_task_list()
             self._sync_interval_to_ui()
             self._refresh_block_actions()
-            if self._selected_task_index >= 0:
-                self.task_list.setCurrentRow(self._selected_task_index)
-            QMessageBox.information(
-                self, "导入成功", f"任务配置已从 {file_path} 导入"
-            )
+            seq_indices = self._get_seq_indices()
+            ind_indices = self._get_ind_indices()
+            if seq_indices:
+                self.seq_task_list.setCurrentRow(0)
+            elif ind_indices:
+                self.ind_task_list.setCurrentRow(0)
+
+            # 显示导入结果
+            total = len(self._task_queue.tasks)
+            event_count = sum(len(t.events) for t in self._task_queue.tasks)
+            if warnings:
+                warn_text = "导入完成，存在以下问题：\n\n"
+                warn_text += "\n".join(f"\u2022 {w}" for w in warnings[:20])
+                if len(warnings) > 20:
+                    warn_text += f"\n\n...以及另外 {len(warnings) - 20} 条警告"
+                warn_text += f"\n\n任务: {total} 个 | 事件: {event_count} 个"
+                QMessageBox.warning(self, "导入完成（有警告）", warn_text)
+            else:
+                QMessageBox.information(
+                    self, "导入成功",
+                    f"成功导入 {total} 个任务，{event_count} 个事件"
+                )
         except Exception as e:
             QMessageBox.critical(
                 self, "导入失败", f"导入任务配置失败: {e}"
@@ -1029,11 +1237,14 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "提示", "请先选择或添加一个任务")
             return
         if event_type in ("keydown", "keyup", "keyclick"):
-            key = self.block_key_combo.currentData()
-            if not key:
+            key1 = self._key1_combo.currentData() or self._key1_combo.currentText()
+            key2 = self._key2_combo.currentData() or self._key2_combo.currentText()
+            key3 = self._key3_combo.currentData() or self._key3_combo.currentText()
+            keys = [k for k in (key1, key2, key3) if k and k != "空" and not k.startswith("\u2500")]
+            if not keys:
                 QMessageBox.warning(self, "提示", "请先选择一个按键")
                 return
-            event = TaskEvent(type=event_type, key=key)
+            event = TaskEvent(type=event_type, keys=keys)
         elif event_type == "wait":
             event = TaskEvent(type="wait", ms=self.block_wait_spin.value())
         else:
@@ -1181,14 +1392,14 @@ class MainWindow(QMainWindow):
             self._setup_hotkey()
 
     def _load_task_queue_config(self) -> None:
-        try:
-            if os.path.exists(TASK_QUEUE_CONFIG_PATH):
-                self._task_queue = TaskQueue.load(TASK_QUEUE_CONFIG_PATH)
-                self._refresh_task_list()
-                self._sync_interval_to_ui()
-                self._refresh_block_actions()
-        except Exception as e:
-            logger.warning("自动加载任务队列配置失败: %s", e)
+        if os.path.exists(TASK_QUEUE_CONFIG_PATH):
+            self._task_queue, warnings = TaskQueue.load_safe(TASK_QUEUE_CONFIG_PATH)
+            if warnings:
+                for w in warnings:
+                    logger.warning("配置加载: %s", w)
+            self._refresh_task_list()
+            self._sync_interval_to_ui()
+            self._refresh_block_actions()
 
     def _collect_config(self) -> BotConfig | None:
         try:

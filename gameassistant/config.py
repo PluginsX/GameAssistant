@@ -93,7 +93,7 @@ class BotConfig:
     attack_delay_max: float = 0.4
     attack_rounds: int = 3
     debug: bool = False
-    input_mode: str = "foreground"  # foreground / postmsg / focus
+    input_mode: str = "postmsg"  # foreground / postmsg / focus
     execution_mode: str = "simple"  # simple / task_queue
     auto_dpi_scale: bool = True     # 自适应屏幕DPI缩放（默认开启）
 

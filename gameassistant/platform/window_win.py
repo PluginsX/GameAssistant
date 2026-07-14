@@ -55,6 +55,10 @@ _VK_TO_SCAN: dict[int, int] = {
     0x55: 0x16, 0x56: 0x2F, 0x57: 0x11, 0x58: 0x2D, 0x59: 0x15,
     0x5A: 0x2C,
     0x20: 0x39, 0x0D: 0x1C, 0x09: 0x0F, 0x1B: 0x01,
+    # 修饰键
+    0x10: 0x2A,  # Shift (left)
+    0x11: 0x1D,  # Ctrl  (left)
+    0x12: 0x38,  # Alt   (left)
     0x70: 0x3B, 0x71: 0x3C, 0x72: 0x3D, 0x73: 0x3E, 0x74: 0x3F,
     0x75: 0x40, 0x76: 0x41, 0x77: 0x42, 0x78: 0x43, 0x79: 0x44,
     0x7A: 0x57, 0x7B: 0x58,
@@ -64,6 +68,58 @@ _VK_TO_SCAN: dict[int, int] = {
 
 # 扩展键集合（方向键等需要 E0 前缀的键）
 _EXTENDED_KEYS: set[int] = {0x25, 0x26, 0x27, 0x28}
+
+# 修饰键集合（PostMessage 无法更新全局键盘状态，必须用 SendInput）
+_MODIFIER_KEYS: set[int] = {0x10, 0x11, 0x12}  # Shift, Ctrl, Alt
+
+
+# ---------------------------------------------------------------------------
+# 复合按键内部辅助（避免 foreground/focus/postmsg 路径重复代码）
+# ---------------------------------------------------------------------------
+
+def _try_postmsg_down(self, hwnd: int, vk_code: int) -> bool:
+    """尝试 PostMessage KEYDOWN，失败时返回 False（不抛异常）。"""
+    try:
+        self._send_key_down_postmsg(hwnd, vk_code)
+        return True
+    except Exception:
+        return False
+
+
+def _try_postmsg_up(self, hwnd: int, vk_code: int) -> bool:
+    """尝试 PostMessage KEYUP，失败时返回 False（不抛异常）。"""
+    try:
+        self._send_key_up_postmsg(hwnd, vk_code)
+        return True
+    except Exception:
+        return False
+
+
+def _send_modifier_combo(self, hwnd: int, vk_codes: list[int]) -> None:
+    """用 pydirectinput 发送修饰键组合（窗口已激活）。"""
+    for vk in vk_codes:
+        key_name = _VK_TO_NAME.get(vk)
+        if key_name:
+            logger.debug("复合键按下: %s (0x%02X)", key_name, vk)
+            pydirectinput.keyDown(key_name)
+            time.sleep(0.03)
+    time.sleep(0.05)
+    for vk in reversed(vk_codes):
+        key_name = _VK_TO_NAME.get(vk)
+        if key_name:
+            logger.debug("复合键松开: %s (0x%02X)", key_name, vk)
+            time.sleep(0.03)
+            pydirectinput.keyUp(key_name)
+
+
+def _send_fg_combo(self, hwnd: int, vk_codes: list[int], mode: str) -> None:
+    """foreground/focus 模式：激活窗口 → 发送组合键 → 恢复窗口。"""
+    prev_hwnd = user32.GetForegroundWindow()
+    self.set_foreground(hwnd)
+    _send_modifier_combo(self, hwnd, vk_codes)
+    if mode == "focus" and prev_hwnd and prev_hwnd != hwnd:
+        time.sleep(0.05)
+        user32.SetForegroundWindow(prev_hwnd)
 
 
 class Win32WindowController(WindowController):
@@ -171,10 +227,10 @@ class Win32WindowController(WindowController):
             vk_code: 虚拟键码，如 0x31 表示 '1' 键。
             mode: 输入模式：
                 "foreground" — 激活窗口到前台后用 pydirectinput 发送（已验证有效）
-                "postmsg"    — 用 PostMessage 后台发送（不打扰用户，但游戏可能不响应）
+                "postmsg"    — 用 PostMessage 后台发送（修饰键自动切 pydirectinput）
                 "focus"      — 快速切焦点：激活游戏->发键->切回原窗口
         """
-        if mode == "postmsg":
+        if mode == "postmsg" and vk_code not in _MODIFIER_KEYS:
             self._send_key_postmsg(hwnd, vk_code)
         elif mode == "focus":
             self._send_key_focus(hwnd, vk_code)
@@ -182,38 +238,210 @@ class Win32WindowController(WindowController):
             self._send_key_foreground(hwnd, vk_code)
 
     def send_key_down(self, hwnd: int, vk_code: int, mode: str = "foreground") -> None:
-        """按键按下（不松开，用于按住场景）。"""
+        """按键按下（不松开，用于按住场景）。
+
+        修饰键（Shift/Ctrl/Alt）即使在 postmsg 模式下也使用 pydirectinput
+        （SendInput）发送，确保游戏能通过 GetAsyncKeyState 检测到。
+        postmsg + 修饰键时自动保存并恢复原前台窗口。
+        PostMessage 失败时自动降级到 SendInput（前台模式）。"""
         if mode == "postmsg":
-            self._send_key_down_postmsg(hwnd, vk_code)
-        else:
-            prev_hwnd: Optional[int] = None
-            if mode == "focus":
+            if vk_code not in _MODIFIER_KEYS:
+                if _try_postmsg_down(self, hwnd, vk_code):
+                    return
+                # PostMessage 失败（如权限不足），降级到 SendInput
+                logger.warning("PostMessage 失败，降级到 SendInput (0x%02X)", vk_code)
+                mode = "foreground"
+            else:
+                # 修饰键：降级 SendInput，保存并恢复前台
                 prev_hwnd = user32.GetForegroundWindow()
-            self.set_foreground(hwnd)
-            key_name = _VK_TO_NAME.get(vk_code)
-            if key_name:
-                logger.debug("按下: %s (0x%02X)", key_name, vk_code)
-                pydirectinput.keyDown(key_name)
-            if mode == "focus" and prev_hwnd and prev_hwnd != hwnd:
-                time.sleep(0.05)
-                user32.SetForegroundWindow(prev_hwnd)
+                self.set_foreground(hwnd)
+                key_name = _VK_TO_NAME.get(vk_code)
+                if key_name:
+                    logger.debug("按下(修饰): %s (0x%02X)", key_name, vk_code)
+                    pydirectinput.keyDown(key_name)
+                if prev_hwnd and prev_hwnd != hwnd:
+                    time.sleep(0.05)
+                    user32.SetForegroundWindow(prev_hwnd)
+                return
+
+        prev_hwnd: Optional[int] = None
+        if mode == "focus":
+            prev_hwnd = user32.GetForegroundWindow()
+        self.set_foreground(hwnd)
+        key_name = _VK_TO_NAME.get(vk_code)
+        if key_name:
+            logger.debug("按下: %s (0x%02X)", key_name, vk_code)
+            pydirectinput.keyDown(key_name)
+        if mode == "focus" and prev_hwnd and prev_hwnd != hwnd:
+            time.sleep(0.05)
+            user32.SetForegroundWindow(prev_hwnd)
 
     def send_key_up(self, hwnd: int, vk_code: int, mode: str = "foreground") -> None:
-        """按键松开。"""
+        """按键松开。
+
+        修饰键（Shift/Ctrl/Alt）即使在 postmsg 模式下也使用 pydirectinput。
+        postmsg + 修饰键时自动保存并恢复原前台窗口。
+        PostMessage 失败时自动降级到 SendInput（前台模式）。"""
         if mode == "postmsg":
-            self._send_key_up_postmsg(hwnd, vk_code)
-        else:
-            prev_hwnd: Optional[int] = None
-            if mode == "focus":
+            if vk_code not in _MODIFIER_KEYS:
+                if _try_postmsg_up(self, hwnd, vk_code):
+                    return
+                # PostMessage 失败，降级到 SendInput
+                logger.warning("PostMessage 失败，降级到 SendInput (0x%02X)", vk_code)
+                mode = "foreground"
+            else:
+                # 修饰键：降级 SendInput，保存并恢复前台
                 prev_hwnd = user32.GetForegroundWindow()
+                self.set_foreground(hwnd)
+                key_name = _VK_TO_NAME.get(vk_code)
+                if key_name:
+                    logger.debug("松开(修饰): %s (0x%02X)", key_name, vk_code)
+                    pydirectinput.keyUp(key_name)
+                if prev_hwnd and prev_hwnd != hwnd:
+                    time.sleep(0.05)
+                    user32.SetForegroundWindow(prev_hwnd)
+                return
+
+        prev_hwnd: Optional[int] = None
+        if mode == "focus":
+            prev_hwnd = user32.GetForegroundWindow()
+        self.set_foreground(hwnd)
+        key_name = _VK_TO_NAME.get(vk_code)
+        if key_name:
+            logger.debug("松开: %s (0x%02X)", key_name, vk_code)
+            pydirectinput.keyUp(key_name)
+        if mode == "focus" and prev_hwnd and prev_hwnd != hwnd:
+            time.sleep(0.05)
+            user32.SetForegroundWindow(prev_hwnd)
+
+    # ------------------------------------------------------------------
+    # 复合按键（覆盖基类实现，优化 foreground/focus 模式的性能）
+    # ------------------------------------------------------------------
+
+    def send_keys(self, hwnd: int, vk_codes: list[int], mode: str = "foreground") -> None:
+        """发送复合按键（覆盖基类实现，优化性能）。
+
+        一次性激活窗口，然后按顺序发送所有键。
+
+        对于复合键 keyclick（如 Ctrl+Shift+A）：
+            foreground/focus: 激活窗口 → 按下 Ctrl → 按下 Shift → 按下 A →
+                              松开 A → 松开 Shift → 松开 Ctrl
+            postmsg: 仅普通键用 PostMessage，含修饰键时自动切为 SendInput
+            且自动保存并恢复原前台窗口，不打扰用户。
+        """
+        if not vk_codes:
+            return
+
+        if mode == "postmsg":
+            has_modifier = any(vk in _MODIFIER_KEYS for vk in vk_codes)
+            if not has_modifier:
+                # 纯普通键：PostMessage 快速发送
+                has_alt = 0x12 in vk_codes
+                try:
+                    for vk in vk_codes:
+                        self._send_key_down_postmsg(hwnd, vk, syskey=has_alt)
+                    time.sleep(0.04)
+                    for vk in reversed(vk_codes):
+                        self._send_key_up_postmsg(hwnd, vk, syskey=has_alt)
+                    return
+                except Exception:
+                    logger.warning("PostMessage 复合键失败，降级到 SendInput")
+                    mode = "foreground"
+                    # 降级后沿用下面的 foreground 路径
+            # 有修饰键 → 降级到 foreground 路径（用 SendInput）
+            # postmsg 模式下自动保存并恢复前台窗口
+            prev_hwnd = user32.GetForegroundWindow()
             self.set_foreground(hwnd)
-            key_name = _VK_TO_NAME.get(vk_code)
-            if key_name:
-                logger.debug("松开: %s (0x%02X)", key_name, vk_code)
-                pydirectinput.keyUp(key_name)
-            if mode == "focus" and prev_hwnd and prev_hwnd != hwnd:
+            _send_modifier_combo(self, hwnd, vk_codes)
+            if prev_hwnd and prev_hwnd != hwnd:
                 time.sleep(0.05)
                 user32.SetForegroundWindow(prev_hwnd)
+            return
+
+        # foreground/focus 模式
+        _send_fg_combo(self, hwnd, vk_codes, mode)
+
+    def send_keys_down(self, hwnd: int, vk_codes: list[int], mode: str = "foreground") -> None:
+        """按下复合按键群（覆盖基类）。"""
+        if not vk_codes:
+            return
+
+        if mode == "postmsg":
+            has_modifier = any(vk in _MODIFIER_KEYS for vk in vk_codes)
+            if not has_modifier:
+                has_alt = 0x12 in vk_codes
+                for vk in vk_codes:
+                    self._send_key_down_postmsg(hwnd, vk, syskey=has_alt)
+                return
+            # 有修饰键 → 降级 SendInput，保存并恢复前台
+            prev_hwnd = user32.GetForegroundWindow()
+            self.set_foreground(hwnd)
+            for vk in vk_codes:
+                key_name = _VK_TO_NAME.get(vk)
+                if key_name:
+                    pydirectinput.keyDown(key_name)
+                    time.sleep(0.03)
+            if prev_hwnd and prev_hwnd != hwnd:
+                time.sleep(0.05)
+                user32.SetForegroundWindow(prev_hwnd)
+            return
+
+        prev_hwnd: Optional[int] = None
+        if mode == "focus":
+            prev_hwnd = user32.GetForegroundWindow()
+        self.set_foreground(hwnd)
+
+        for vk in vk_codes:
+            key_name = _VK_TO_NAME.get(vk)
+            if key_name:
+                logger.debug("复合键按下组: %s (0x%02X)", key_name, vk)
+                pydirectinput.keyDown(key_name)
+                time.sleep(0.03)
+
+        if mode == "focus" and prev_hwnd and prev_hwnd != hwnd:
+            time.sleep(0.05)
+            user32.SetForegroundWindow(prev_hwnd)
+
+    def send_keys_up(self, hwnd: int, vk_codes: list[int], mode: str = "foreground") -> None:
+        """松开复合按键群（覆盖基类）。"""
+        if not vk_codes:
+            return
+
+        if mode == "postmsg":
+            has_modifier = any(vk in _MODIFIER_KEYS for vk in vk_codes)
+            if not has_modifier:
+                has_alt = 0x12 in vk_codes
+                for vk in reversed(vk_codes):
+                    self._send_key_up_postmsg(hwnd, vk, syskey=has_alt)
+                return
+            # 有修饰键 → 降级 SendInput，保存并恢复前台
+            prev_hwnd = user32.GetForegroundWindow()
+            self.set_foreground(hwnd)
+            for vk in reversed(vk_codes):
+                key_name = _VK_TO_NAME.get(vk)
+                if key_name:
+                    time.sleep(0.03)
+                    pydirectinput.keyUp(key_name)
+            if prev_hwnd and prev_hwnd != hwnd:
+                time.sleep(0.05)
+                user32.SetForegroundWindow(prev_hwnd)
+            return
+
+        prev_hwnd: Optional[int] = None
+        if mode == "focus":
+            prev_hwnd = user32.GetForegroundWindow()
+        self.set_foreground(hwnd)
+
+        for vk in reversed(vk_codes):
+            key_name = _VK_TO_NAME.get(vk)
+            if key_name:
+                logger.debug("复合键松开组: %s (0x%02X)", key_name, vk)
+                time.sleep(0.03)
+                pydirectinput.keyUp(key_name)
+
+        if mode == "focus" and prev_hwnd and prev_hwnd != hwnd:
+            time.sleep(0.05)
+            user32.SetForegroundWindow(prev_hwnd)
 
     def capture_window(self, hwnd: int):
         """截图功能占位（当前返回 1x1 占位图，实际截图由 GUI 模块提供）。"""
@@ -240,34 +468,58 @@ class Win32WindowController(WindowController):
             time.sleep(0.05)
 
     def _send_key_postmsg(self, hwnd: int, vk_code: int) -> None:
-        """后台模式：用 PostMessage 发送 WM_KEYDOWN/WM_KEYUP。"""
+        """后台模式：用 PostMessage 发送 WM_KEYDOWN/WM_KEYUP。
+
+        Alt (VK_MENU) 使用 WM_SYSKEYDOWN/WM_SYSKEYUP。
+        """
         scan = _VK_TO_SCAN.get(vk_code, vk_code)
+        is_alt = vk_code == 0x12
+        msg_down = 0x0104 if is_alt else 0x0100
+        msg_up = 0x0105 if is_alt else 0x0101
         lparam_down = (scan << 16) | 1
         lparam_up = (scan << 16) | 0xC0000001
+        if is_alt:
+            lparam_down |= 0x20000000
+            lparam_up |= 0x20000000
 
-        WM_KEYDOWN = 0x0100
-        WM_KEYUP = 0x0101
-
-        win32gui.PostMessage(hwnd, WM_KEYDOWN, vk_code, lparam_down)
+        win32gui.PostMessage(hwnd, msg_down, vk_code, lparam_down)
         time.sleep(0.05)
-        win32gui.PostMessage(hwnd, WM_KEYUP, vk_code, lparam_up)
+        win32gui.PostMessage(hwnd, msg_up, vk_code, lparam_up)
         logger.debug("PostMessage 按键: 0x%02X (scan=0x%02X)", vk_code, scan)
 
-    def _send_key_down_postmsg(self, hwnd: int, vk_code: int) -> None:
-        """按键按下（PostMessage 模式）。"""
-        scan = _VK_TO_SCAN.get(vk_code, vk_code)
-        is_extended = vk_code in _EXTENDED_KEYS
-        lparam = (scan << 16) | (0x10000 if is_extended else 0) | 1
-        win32gui.PostMessage(hwnd, 0x0100, vk_code, lparam)
-        logger.debug("PostMessage 按下: 0x%02X", vk_code)
+    def _send_key_down_postmsg(self, hwnd: int, vk_code: int, syskey: bool = False) -> None:
+        """按键按下（PostMessage 模式）。
 
-    def _send_key_up_postmsg(self, hwnd: int, vk_code: int) -> None:
-        """按键松开（PostMessage 模式）。"""
+        Args:
+            hwnd: 目标窗口句柄。
+            vk_code: 虚拟键码。
+            syskey: True 时使用 WM_SYSKEYDOWN（Alt 组合键需要）。
+        """
         scan = _VK_TO_SCAN.get(vk_code, vk_code)
         is_extended = vk_code in _EXTENDED_KEYS
+        msg = 0x0104 if syskey else 0x0100  # WM_SYSKEYDOWN / WM_KEYDOWN
+        lparam = (scan << 16) | (0x10000 if is_extended else 0) | 1
+        if syskey:
+            lparam |= 0x20000000  # 设置 bit 29（context code=1，表示 Alt 按下）
+        win32gui.PostMessage(hwnd, msg, vk_code, lparam)
+        logger.debug("PostMessage %s: 0x%02X", "SYSKEYDOWN" if syskey else "KEYDOWN", vk_code)
+
+    def _send_key_up_postmsg(self, hwnd: int, vk_code: int, syskey: bool = False) -> None:
+        """按键松开（PostMessage 模式）。
+
+        Args:
+            hwnd: 目标窗口句柄。
+            vk_code: 虚拟键码。
+            syskey: True 时使用 WM_SYSKEYUP（Alt 组合键需要）。
+        """
+        scan = _VK_TO_SCAN.get(vk_code, vk_code)
+        is_extended = vk_code in _EXTENDED_KEYS
+        msg = 0x0105 if syskey else 0x0101  # WM_SYSKEYUP / WM_KEYUP
         lparam = (scan << 16) | (0x10000 if is_extended else 0) | 0xC0000001
-        win32gui.PostMessage(hwnd, 0x0101, vk_code, lparam)
-        logger.debug("PostMessage 松开: 0x%02X", vk_code)
+        if syskey:
+            lparam |= 0x20000000  # 设置 bit 29（context code=1）
+        win32gui.PostMessage(hwnd, msg, vk_code, lparam)
+        logger.debug("PostMessage %s: 0x%02X", "SYSKEYUP" if syskey else "KEYUP", vk_code)
 
     def _press_vk(self, vk_code: int) -> None:
         """用 pydirectinput 发送按键（按下+松开）。"""
@@ -295,3 +547,7 @@ capture_window = _default_controller.capture_window
 send_key_foreground = _default_controller._send_key_foreground
 send_key_focus = _default_controller._send_key_focus
 send_key_postmsg = _default_controller._send_key_postmsg
+# 复合按键方法（继承自 WindowController 基类实现）
+send_keys = _default_controller.send_keys
+send_keys_down = _default_controller.send_keys_down
+send_keys_up = _default_controller.send_keys_up

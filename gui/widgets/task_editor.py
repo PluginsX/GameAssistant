@@ -165,7 +165,8 @@ class BlockActionItemWidget(QWidget):
             self._parent._remove_block_action(self.index)
 
     def get_key(self) -> str:
-        return self.key_combo.currentData() or self.key_combo.currentText()
+        key = self.key_combo.currentData() or self.key_combo.currentText()
+        return "" if key == "空" else key
 
     def get_type(self) -> str:
         return self.type_combo.currentText()
@@ -243,21 +244,39 @@ class EventListWidget(QListWidget):
 
 
 class TaskItemWidget(QWidget):
-    """任务列表项组件（显示任务名、启用状态、重复次数）。"""
+    """任务列表项组件（显示任务名、启用状态、类型图标）。"""
 
     def __init__(self, task: Task, index: int, list_widget: QListWidget,
-                 main_window):
+                 main_window, task_type: str = "sequential"):
         super().__init__()
         self.task = task
         self.index = index
         self._list_widget = list_widget
         self._main = main_window
+        self._task_type = task_type
         self.setAutoFillBackground(False)
         self.setCursor(Qt.PointingHandCursor)
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(8, 4, 8, 4)
-        layout.setSpacing(8)
+        layout.setSpacing(6)
+
+        # 类型标记
+        badge = QLabel("S" if task_type == "sequential" else "I")
+        badge.setFixedSize(16, 16)
+        badge.setAlignment(Qt.AlignCenter)
+        if task_type == "sequential":
+            badge.setStyleSheet(
+                "color: #6b8cff; background: #1e2a4a; border-radius: 3px; "
+                "font-size: 10px; font-weight: 800;"
+            )
+        else:
+            badge.setStyleSheet(
+                "color: #f59e0b; background: #3a2a0a; border-radius: 3px; "
+                "font-size: 10px; font-weight: 800;"
+            )
+        badge.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        layout.addWidget(badge)
 
         self.checkbox = QCheckBox()
         self.checkbox.setChecked(task.enabled)
@@ -283,7 +302,7 @@ class TaskItemWidget(QWidget):
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
             self._list_widget.setCurrentRow(self.index)
-            self._main._on_task_selected(self.index)
+            self._main._on_list_selected(self.index, self._task_type)
         super().mousePressEvent(event)
 
     def update_index(self, index: int):
@@ -295,6 +314,8 @@ class TaskItemWidget(QWidget):
 
 def _populate_key_combo(combo: QComboBox):
     """填充按键下拉列表。"""
+    combo.clear()
+    combo.addItem("空", "")
     groups = [
         ("数字", [str(i) for i in range(10)]),
         ("字母", [chr(c) for c in range(0x41, 0x5B)]),

@@ -13,9 +13,10 @@ from typing import Callable, Optional
 from PIL import Image
 
 from gameassistant.config import BotConfig
-from gameassistant.models.tasks import TaskQueue
+from gameassistant.models.tasks import Task, TaskQueue
 from gameassistant.platform.window_win import (
-    get_hwnd, is_minimized, send_key, send_key_down, send_key_up, capture_window,
+    get_hwnd, is_minimized, send_key, send_key_down, send_key_up,
+    send_keys, send_keys_down, send_keys_up, capture_window,
 )
 
 logger = logging.getLogger(__name__)
@@ -62,6 +63,8 @@ class SanguoBot:
         self.task_queue: Optional[TaskQueue] = None
         # 已按下的按键集合（用于停止时释放，防止卡键）
         self._pressed_keys: set[int] = set()
+        # 顺序类型任务的执行索引（循环跟踪当前该执行哪一个顺序任务）
+        self._seq_task_index: int = 0
 
     def run(self) -> None:
         """主循环入口，捕获 Ctrl+C 优雅退出。"""
@@ -231,68 +234,88 @@ class SanguoBot:
             self._interruptible_sleep(random.uniform(0.3, 0.6))
 
     def _handle_task_queue(self) -> None:
-        """任务队列模式：按顺序执行任务队列中的所有事件。"""
+        """任务队列模式：按顺序执行顺序任务，同时独立任务自我循环。"""
         if self.task_queue is None:
             logger.warning("任务队列为空，请先在编辑器中创建任务")
             return
 
-        enabled_tasks = self.task_queue.get_enabled_tasks()
-        if not enabled_tasks:
-            logger.warning("没有已启用的任务，任务队列空转")
-            return
-
         mode = self.config.input_mode
-        for task in enabled_tasks:
+
+        # ------------------------------------------------------------------
+        # 顺序类型任务：按列表顺序逐个执行，全部完成后回到第一个
+        # ------------------------------------------------------------------
+        seq_tasks = self.task_queue.get_sequential_enabled()
+        if seq_tasks:
+            # 确保索引在有效范围内
+            if self._seq_task_index >= len(seq_tasks):
+                self._seq_task_index = 0
+            task = seq_tasks[self._seq_task_index]
+            if self._running:
+                self._execute_task_events(task, mode)
+                # 当前任务执行完毕，移到下一个
+                self._seq_task_index += 1
+                if self._seq_task_index >= len(seq_tasks):
+                    if self.task_queue.loop_forever:
+                        self._seq_task_index = 0
+                        logger.debug("顺序任务一轮完成，循环继续")
+                    else:
+                        logger.info("顺序任务全部执行完毕（非循环模式）")
+                        self._running = False
+
+        # ------------------------------------------------------------------
+        # 独立类型任务：每个任务独立自我循环
+        # ------------------------------------------------------------------
+        ind_tasks = self.task_queue.get_independent_enabled()
+        for task in ind_tasks:
             if not self._running:
                 return
-            for rnd in range(task.repeat):
+            self._execute_task_events(task, mode)
+
+    def _execute_task_events(self, task: Task, mode: str) -> None:
+        """执行单个任务的所有事件（含重复次数）。
+
+        Args:
+            task: 要执行的任务。
+            mode: 输入模式，传递到按键发送函数。
+        """
+        for rnd in range(task.repeat):
+            if not self._running:
+                return
+            logger.info("执行任务: %s (轮次 %d/%d)",
+                        task.name, rnd + 1, task.repeat)
+            for event in task.events:
                 if not self._running:
                     return
-                logger.info("执行任务: %s (轮次 %d/%d)",
-                           task.name, rnd + 1, task.repeat)
-                for event in task.events:
-                    if not self._running:
-                        return
-
-                    # 检查是否被屏蔽
-                    if self.task_queue.is_event_blocked(event):
-                        logger.debug("  [屏蔽] %s", event.get_display_text())
-                        continue
-
-                    etype = event.type
-                    if etype == "keydown":
-                        vk = event.vk_code
-                        logger.debug("  \u2193 %s", event.key)
-                        send_key_down(self.hwnd, vk, mode=mode)
-                        self._pressed_keys.add(vk)
-                    elif etype == "keyup":
-                        vk = event.vk_code
-                        logger.debug("  \u2191 %s", event.key)
-                        send_key_up(self.hwnd, vk, mode=mode)
+                if self.task_queue.is_event_blocked(event):
+                    logger.debug("  [屏蔽] %s", event.get_display_text())
+                    continue
+                etype = event.type
+                if etype == "keydown":
+                    vk_codes = event.vk_codes
+                    logger.debug("  \u2193 %s", event.get_display_text())
+                    send_keys_down(self.hwnd, vk_codes, mode=mode)
+                    self._pressed_keys.update(vk_codes)
+                elif etype == "keyup":
+                    vk_codes = event.vk_codes
+                    logger.debug("  \u2191 %s", event.get_display_text())
+                    send_keys_up(self.hwnd, vk_codes, mode=mode)
+                    for vk in vk_codes:
                         self._pressed_keys.discard(vk)
-                    elif etype == "keyclick":
-                        vk = event.vk_code
-                        logger.debug("  \u2195 %s", event.key)
-                        send_key(self.hwnd, vk, mode=mode)
-                    elif etype == "wait":
-                        logger.debug("  \u23F1 等待 %dms", event.ms)
-                        if not self._interruptible_sleep(event.ms / 1000.0):
+                elif etype == "keyclick":
+                    vk_codes = event.vk_codes
+                    logger.debug("  \u2195 %s", event.get_display_text())
+                    send_keys(self.hwnd, vk_codes, mode=mode)
+                elif etype == "wait":
+                    logger.debug("  \u23F1 等待 %dms", event.ms)
+                    if not self._interruptible_sleep(event.ms / 1000.0):
+                        return
+                elif etype == "wait_random":
+                    wait_s = random.uniform(event.min_ms, event.max_ms) / 1000.0
+                    logger.debug("  \u23F1 随机等待 %.0fms", wait_s * 1000)
+                    if not self._interruptible_sleep(wait_s):
+                        return
+                if etype in ("keydown", "keyup", "keyclick"):
+                    interval_ms = self.task_queue.get_action_interval_ms()
+                    if interval_ms > 0:
+                        if not self._interruptible_sleep(interval_ms / 1000.0):
                             return
-                    elif etype == "wait_random":
-                        wait_s = random.uniform(event.min_ms, event.max_ms) / 1000.0
-                        logger.debug("  \u23F1 随机等待 %.0fms", wait_s * 1000)
-                        if not self._interruptible_sleep(wait_s):
-                            return
-
-                    # 最小动作间隔（仅对按键类事件生效）
-                    if etype in ("keydown", "keyup", "keyclick"):
-                        interval_ms = self.task_queue.get_action_interval_ms()
-                        if interval_ms > 0:
-                            if not self._interruptible_sleep(interval_ms / 1000.0):
-                                return
-
-        if self.task_queue.loop_forever:
-            logger.debug("任务队列一轮完成，循环继续")
-        else:
-            logger.info("任务队列执行完毕（非循环模式）")
-            self._running = False
