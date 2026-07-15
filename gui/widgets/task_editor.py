@@ -186,8 +186,10 @@ class EventListWidget(QListWidget):
         self.setVerticalScrollMode(QAbstractItemView.ScrollPerPixel)
         self._drag_start_index = -1
 
-    def refresh_events(self, task: Task):
+    def refresh_events(self, task: Task | None):
         self.clear()
+        if task is None:
+            return
         for i, event in enumerate(task.events):
             item = QListWidgetItem()
             widget = _TaskBlockWidget(event, i, self)

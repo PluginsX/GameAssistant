@@ -43,6 +43,11 @@ from PyQt5.QtWidgets import (
 )
 
 import win32gui
+import win32ui
+import win32con
+import win32api
+
+from PIL import Image
 
 from gameassistant.config import BotConfig
 from gameassistant.models.tasks import Task, TaskEvent, TaskQueue, TASK_QUEUE_CONFIG_PATH
@@ -327,6 +332,60 @@ class MainWindow(QMainWindow):
             self._sync_max_button()
         super().changeEvent(event)
 
+    def nativeEvent(self, event_type, message):
+        """处理 Windows 原生消息，实现无边框窗口拖拽/缩放/去白边。"""
+        try:
+            msg = ctypes.wintypes.MSG.from_address(message.__int__())
+
+            if msg.message == WM_NCCALCSIZE:
+                # 客户区=整个窗口，消除系统标题栏/边框保留区
+                return True, 0
+
+            if msg.message == WM_NCHITTEST:
+                # lParam 低位=鼠标X，高位=鼠标Y（屏幕坐标，有符号16位）
+                lparam = msg.lParam
+                x = ctypes.c_int16(lparam & 0xFFFF).value
+                y = ctypes.c_int16((lparam >> 16) & 0xFFFF).value
+
+                from PyQt5.QtCore import QPoint
+                local_pos = self.mapFromGlobal(QPoint(x, y))
+
+                # 边缘缩放检测
+                rect = self.rect()
+                b = BORDER_WIDTH
+                l = local_pos.x() < b
+                r = local_pos.x() > rect.width() - b
+                t = local_pos.y() < b
+                bot = local_pos.y() > rect.height() - b
+
+                if t and l:     return True, HTTOPLEFT
+                if t and r:     return True, HTTOPRIGHT
+                if bot and l:   return True, HTBOTTOMLEFT
+                if bot and r:   return True, HTBOTTOMRIGHT
+                if t:           return True, HTTOP
+                if bot:         return True, HTBOTTOM
+                if l:           return True, HTLEFT
+                if r:           return True, HTRIGHT
+
+                # 标题栏拖拽（标题栏+边缘b像素高度，方便从顶部边框区域拖拽）
+                if hasattr(self, '_title_bar') and self._title_bar:
+                    tb = self._title_bar
+                    tb_rect = tb.geometry()
+                    tb_rect.setHeight(tb_rect.height() + b)
+                    if tb_rect.contains(local_pos):
+                        # 排除可交互子控件（按钮、下拉框等），否则它们无法点击
+                        tb_local = tb.mapFromGlobal(QPoint(x, y))
+                        for child in tb.children():
+                            if isinstance(child, (QPushButton, QComboBox)):
+                                if child.geometry().contains(tb_local) and child.isEnabled():
+                                    return True, HTCLIENT
+                        return True, HTCAPTION
+
+                return True, HTCLIENT
+        except Exception:
+            pass
+        return super().nativeEvent(event_type, message)
+
     # ═══════════════════════════════════════════════════════════
     # 构建：控制栏（区 2）
     # ═══════════════════════════════════════════════════════════
@@ -380,17 +439,20 @@ class MainWindow(QMainWindow):
         sep.setStyleSheet("color: #3a3a3a;")
         layout.addWidget(sep)
 
-        # 窗口标题
-        self.title_edit = QLineEdit()
-        self.title_edit.setPlaceholderText("窗口标题(如QQ三国)")
-        self.title_edit.setText("QQ三国")
-        self.title_edit.setFixedWidth(120)
-        self.title_edit.setStyleSheet(
-            "QLineEdit { background: #2a2a2a; color: #e0e0e0; border: 1px solid #3a3a3a; "
-            "border-radius: 4px; padding: 3px 6px; font-size: 11px; }"
+        # 窗口选择按钮
+        self._window_title = "QQ三国"
+        self.title_btn = QPushButton(" QQ三国")
+        self.title_btn.setFixedWidth(140)
+        self.title_btn.setCursor(Qt.PointingHandCursor)
+        self.title_btn.setStyleSheet(
+            "QPushButton { background: #2a2a2a; color: #e0e0e0; border: 1px solid #3a3a3a; "
+            "border-radius: 4px; padding: 3px 8px; font-size: 11px; text-align: left; } "
+            "QPushButton:hover { background: #3a3a3a; border-color: #6b8cff; }"
         )
+        self.title_btn.clicked.connect(self._show_window_picker)
+        self._window_picker_dialog = None
         layout.addWidget(QLabel("窗口:"))
-        layout.addWidget(self.title_edit)
+        layout.addWidget(self.title_btn)
 
         # 输入模式
         self.cmb_input_mode = QComboBox()
@@ -572,123 +634,548 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(self._task_tab)
 
-        # ── 下半：动作库 ──────────────────────────────────────
+        # ── 下半：动作库（可折叠分类） ─────────────────────────
         bricks_label = QLabel("■ 动作库")
         bricks_label.setStyleSheet(_SECTION_TITLE_STYLE)
         layout.addWidget(bricks_label)
 
-        bricks_frame = QFrame()
-        bricks_frame.setStyleSheet(
-            "QFrame { background: #1a1a1a; border: 1px solid #3a3a3a; border-radius: 6px; }"
+        # 按键触发
+        self._sec_key = CollapsibleSection("按键触发", expanded=False)
+        key_btn = QPushButton("✚ 按键触发")
+        key_btn.setStyleSheet(
+            "QPushButton { background: #2a3a6a; color: #e0e0e0; border: 1px solid #3a4a7a; "
+            "border-radius: 4px; padding: 6px 12px; font-size: 12px; font-weight: 600; "
+            "text-align: left; } "
+            "QPushButton:hover { background: #3a4a8a; border-color: #6b8cff; }"
         )
-        bricks_layout = QVBoxLayout(bricks_frame)
-        bricks_layout.setContentsMargins(8, 6, 8, 6)
-        bricks_layout.setSpacing(4)
+        key_btn.setCursor(Qt.PointingHandCursor)
+        key_btn.clicked.connect(lambda: self._add_action("keyclick"))
+        self._sec_key.addWidget(key_btn)
+        layout.addWidget(self._sec_key)
 
-        bricks_layout.addWidget(QLabel("按键组合:"))
-        key_row = QHBoxLayout()
-        key_row.setSpacing(2)
-        self._key1_combo = QComboBox()
-        _populate_key_combo(self._key1_combo)
-        key_row.addWidget(self._key1_combo)
-
-        plus1 = QLabel("+")
-        plus1.setStyleSheet("color: #888; font-size: 12px; font-weight: 700; padding: 0 1px;")
-        plus1.setFixedWidth(12)
-        key_row.addWidget(plus1)
-
-        self._key2_combo = QComboBox()
-        _populate_key_combo(self._key2_combo)
-        key_row.addWidget(self._key2_combo)
-
-        plus2 = QLabel("+")
-        plus2.setStyleSheet("color: #888; font-size: 12px; font-weight: 700; padding: 0 1px;")
-        plus2.setFixedWidth(12)
-        key_row.addWidget(plus2)
-
-        self._key3_combo = QComboBox()
-        _populate_key_combo(self._key3_combo)
-        key_row.addWidget(self._key3_combo)
-        key_row.addStretch()
-        bricks_layout.addLayout(key_row)
-
-        btn_row = QHBoxLayout()
-        btn_row.setSpacing(4)
-        btn_down = QPushButton("↓ 按下")
-        btn_down.setStyleSheet(
-            "background: #3b82f6; color: white; border: none; border-radius: 4px; "
-            "padding: 5px 10px; font-size: 11px; font-weight: 600;"
+        # 流程控制
+        self._sec_flow = CollapsibleSection("流程控制", expanded=False)
+        wait_btn = QPushButton("⏱ 等待")
+        wait_btn.setStyleSheet(
+            "QPushButton { background: #3a2a1a; color: #e0e0e0; border: 1px solid #5a4a2a; "
+            "border-radius: 4px; padding: 6px 12px; font-size: 12px; font-weight: 600; "
+            "text-align: left; } "
+            "QPushButton:hover { background: #4a3a2a; border-color: #f59e0b; }"
         )
-        btn_down.clicked.connect(lambda: self._add_event("keydown"))
-        btn_row.addWidget(btn_down)
+        wait_btn.setCursor(Qt.PointingHandCursor)
+        wait_btn.clicked.connect(lambda: self._add_action("wait"))
+        self._sec_flow.addWidget(wait_btn)
+        layout.addWidget(self._sec_flow)
 
-        btn_up = QPushButton("↑ 松开")
-        btn_up.setStyleSheet(
-            "background: #8b5cf6; color: white; border: none; border-radius: 4px; "
-            "padding: 5px 10px; font-size: 11px; font-weight: 600;"
-        )
-        btn_up.clicked.connect(lambda: self._add_event("keyup"))
-        btn_row.addWidget(btn_up)
-
-        btn_click = QPushButton("↕ 单击")
-        btn_click.setStyleSheet(
-            "background: #10b981; color: white; border: none; border-radius: 4px; "
-            "padding: 5px 10px; font-size: 11px; font-weight: 600;"
-        )
-        btn_click.clicked.connect(lambda: self._add_event("keyclick"))
-        btn_row.addWidget(btn_click)
-
-        bricks_layout.addLayout(btn_row)
-        bricks_layout.addSpacing(2)
-
-        bricks_layout.addWidget(QLabel("等待 (ms):"))
-        wait_row = QHBoxLayout()
-        wait_row.setSpacing(4)
-        self.wait_random_check = QCheckBox("区间随机")
-        self.wait_random_check.setStyleSheet("color: #c0c0c0; font-size: 11px;")
-        self.wait_random_check.toggled.connect(self._on_wait_random_toggled)
-        wait_row.addWidget(self.wait_random_check)
-
-        self.block_wait_spin = QSpinBox()
-        self.block_wait_spin.setRange(10, 999999)
-        self.block_wait_spin.setValue(500)
-        self.block_wait_spin.setFixedWidth(70)
-        wait_row.addWidget(self.block_wait_spin)
-
-        self.block_wait_min_spin = QSpinBox()
-        self.block_wait_min_spin.setRange(10, 999999)
-        self.block_wait_min_spin.setValue(200)
-        self.block_wait_min_spin.setFixedWidth(60)
-        self.block_wait_min_spin.setVisible(False)
-        wait_row.addWidget(self.block_wait_min_spin)
-
-        self.block_wait_max_spin = QSpinBox()
-        self.block_wait_max_spin.setRange(10, 999999)
-        self.block_wait_max_spin.setValue(500)
-        self.block_wait_max_spin.setFixedWidth(60)
-        self.block_wait_max_spin.setVisible(False)
-        wait_row.addWidget(self.block_wait_max_spin)
-
-        btn_wait = QPushButton("⏱ 等待")
-        btn_wait.setStyleSheet(
-            "background: #f59e0b; color: #1a1a1a; border: none; border-radius: 4px; "
-            "padding: 5px 10px; font-size: 11px; font-weight: 600;"
-        )
-        btn_wait.clicked.connect(self._on_add_wait_event)
-        wait_row.addWidget(btn_wait)
-        wait_row.addStretch()
-        bricks_layout.addLayout(wait_row)
-
-        layout.addWidget(bricks_frame, 1)
+        layout.addStretch()
         return widget
 
-    def _on_wait_random_toggled(self, checked: bool):
-        self.block_wait_spin.setVisible(not checked)
-        self.block_wait_min_spin.setVisible(checked)
-        self.block_wait_max_spin.setVisible(checked)
+    def _add_action(self, action_type: str):
+        """从动作库添加一个默认动作到当前任务的选中事件之后。"""
+        if action_type == "keyclick":
+            event = TaskEvent(type="keyclick", keys=["A"])
+        elif action_type == "wait":
+            event = TaskEvent(type="wait", ms=500)
+        else:
+            return
+
+        tab = self._task_tab.currentIndex()
+        task_type = "sequential" if tab == 0 else "independent"
+        lst = self.seq_task_list if tab == 0 else self.ind_task_list
+        tasks = self._tasks_of_type(task_type)
+        task_row = lst.currentRow()
+        if task_row < 0 or task_row >= len(tasks):
+            return
+        task = tasks[task_row]
+
+        # 插入到选中事件之后，没选则追加到末尾
+        sel_row = self.event_list.currentRow()
+        if 0 <= sel_row < len(task.events):
+            task.events.insert(sel_row + 1, event)
+        else:
+            task.events.append(event)
+
+        self.event_list.refresh_events(task)
+        # 选中新插入的事件
+        insert_idx = sel_row + 1 if 0 <= sel_row < len(task.events) - 1 else len(task.events) - 1
+        self.event_list.setCurrentRow(insert_idx) 
+
+    # ═══════════════════════════════════════════════════════════
+    # 按钮动作
+    # ═══════════════════════════════════════════════════════════
+
+    def on_start(self):
+        """启动挂机脚本。"""
+        if self.worker is not None and self.worker.isRunning():
+            return
+
+        # 保存当前配置
+        self.on_save()
+
+        # 根据执行模式创建 TaskQueue
+        task_queue = None
+        if self.config.execution_mode == "task_queue":
+            task_queue = self._task_queue
+
+        self.worker = BotWorker(self.config, task_queue=task_queue)
+
+        # 连接信号
+        self.worker.log_signal.connect(self._on_worker_log)
+        self.worker.status_signal.connect(self._on_worker_status)
+
+        self.worker.start()
+
+        self.start_btn.setEnabled(False)
+        self.stop_btn.setEnabled(True)
+        self.apply_btn.setEnabled(True)
+        self.status_label.setText("运行中")
+        self.status_dot.setStyleSheet("color: #4ade80; font-size: 16px;")
+
+    def on_stop(self):
+        """停止挂机脚本。"""
+        if self.worker is not None and self.worker.isRunning():
+            self.worker.stop()
+            self.worker.wait(5000)
+
+        self.worker = None
+        self.start_btn.setEnabled(True)
+        self.stop_btn.setEnabled(False)
+        self.apply_btn.setEnabled(False)
+        self.status_label.setText("已停止")
+        self.status_dot.setStyleSheet("color: #ef4444; font-size: 16px;")
+
+    def on_apply(self):
+        """热更新配置到运行中的 worker。"""
+        if self.worker is not None and self.worker.isRunning():
+            # 从表单收集最新值
+            new_config = self._collect_form_config()
+            self.worker.apply_config(new_config)
+            self._status_log.setText("配置已热更新")
+        else:
+            self._status_log.setText("脚本未运行，无需应用")
+
+    def on_save(self):
+        """保存当前配置到文件。"""
+        new_config = self._collect_form_config()
+        new_config.save()
+        self.config.apply_from(new_config)
+        # 同时持久化 TaskQueue 配置（间隔/屏蔽等）
+        self._save_task_queue_config()
+        self._status_log.setText("配置已保存")
+
+    def _save_task_queue_config(self):
+        """将间隔/屏蔽等 UI 值同步到 TaskQueue 并持久化。"""
+        if self._task_queue is not None:
+            self._task_queue.min_action_interval = self.min_interval_spin.value()
+            self._task_queue.min_action_interval_random = self.min_interval_random_check.isChecked()
+            self._task_queue.min_action_interval_min = self.min_interval_min_spin.value()
+            self._task_queue.min_action_interval_max = self.min_interval_max_spin.value()
+            self._task_queue.block_actions_enabled = self.cb_block_actions.isChecked()
+            blocked = []
+            for w in self._block_action_widgets:
+                k = w.get_key()
+                t = w.get_type()
+                if k:
+                    blocked.append(f"{k}:{t}")
+            self._task_queue.blocked_actions = blocked
+            try:
+                self._task_queue.save(TASK_QUEUE_CONFIG_PATH)
+            except Exception as e:
+                logger.warning("保存任务配置失败: %s", e)
+
+    def _collect_form_config(self) -> BotConfig:
+        """从 UI 表单收集当前值，返回新的 BotConfig 对象。"""
+        c = BotConfig()
+        c.window_title = self._window_title
+        c.input_mode = self.cmb_input_mode.currentText()
+        c.execution_mode = "task_queue"  # 当前仅 task_queue 模式
+        c.hotkey_enabled = self.hotkey_checkbox.isChecked()
+        c.hotkey_toggle = self.hotkey_combo.currentText().lower()
+        c.auto_dpi_scale = self.dpi_scale_check.isChecked()
+        c.debug = self.debug_check.isChecked()
+        return c
+
+    # ═══════════════════════════════════════════════════════════
+    # Worker 信号处理
+    # ═══════════════════════════════════════════════════════════
+
+    def _on_worker_log(self, message: str, level: str):
+        """处理 worker 发来的日志消息。"""
+        self._status_log.setText(message)
+        if hasattr(self, "log_text") and self.log_text.isVisible():
+            self.log_text.append(message)
+
+    def _on_worker_status(self, status: str):
+        """处理 worker 发来的状态变化。"""
+        self.status_label.setText(status)
+        if "运行" in status:
+            self.status_dot.setStyleSheet("color: #4ade80; font-size: 16px;")
+        else:
+            self.status_dot.setStyleSheet("color: #ef4444; font-size: 16px;")
+        if status == "已停止":
+            self.start_btn.setEnabled(True)
+            self.stop_btn.setEnabled(False)
+            self.apply_btn.setEnabled(False)
+
+    # ═══════════════════════════════════════════════════════════
+    # 任务管理
+    # ═══════════════════════════════════════════════════════════
+
+    def _tasks_of_type(self, task_type: str) -> list:
+        """从 TaskQueue 的 flat tasks 列表中筛选指定类型的任务。"""
+        if self._task_queue is None:
+            return []
+        return [t for t in self._task_queue.tasks if t.task_type == task_type]
+
+    def _on_add_task(self, task_type: str):
+        """添加新任务。"""
+        if self._task_queue is None:
+            self._task_queue = TaskQueue()
+
+        count = len(self._tasks_of_type(task_type))
+        name = f"{'串行' if task_type == 'sequential' else '并行'}任务 {count + 1}"
+        self._task_queue.tasks.append(Task(name=name, task_type=task_type))
+        self._refresh_task_lists()
+        self._select_last_task(task_type)
+
+    def _on_del_task(self):
+        """删除选中的任务。"""
+        if self._task_queue is None:
+            return
+        tab = self._task_tab.currentIndex()
+        task_type = "sequential" if tab == 0 else "independent"
+        lst = self.seq_task_list if tab == 0 else self.ind_task_list
+        row = lst.currentRow()
+        if row < 0:
+            return
+        same_type_indices = [
+            i for i, t in enumerate(self._task_queue.tasks)
+            if t.task_type == task_type
+        ]
+        if row < len(same_type_indices):
+            idx = same_type_indices[row]
+            self._task_queue.tasks.pop(idx)
+        self._refresh_task_lists()
+        self._update_event_list()
+
+    def _on_rename_task(self):
+        """重命名选中的任务。"""
+        if self._task_queue is None:
+            return
+        tab = self._task_tab.currentIndex()
+        task_type = "sequential" if tab == 0 else "independent"
+        lst = self.seq_task_list if tab == 0 else self.ind_task_list
+        tasks = self._tasks_of_type(task_type)
+        row = lst.currentRow()
+        if row < 0 or row >= len(tasks):
+            return
+        old_name = tasks[row].name
+        new_name, ok = QInputDialog.getText(self, "重命名", "任务名称:", text=old_name)
+        if ok and new_name.strip():
+            tasks[row].name = new_name.strip()
+            self._refresh_task_lists()
+            self._update_event_list()
+
+    def _on_list_selected(self, row: int, task_type: str):
+        """任务列表选择变化。"""
+        if row < 0 or self._task_queue is None:
+            self._show_task_properties()
+            return
+        tasks = self._tasks_of_type(task_type)
+        if row < len(tasks):
+            task = tasks[row]
+            # 右侧切换到任务属性
+            self._show_task_properties()
+            # 更新属性面板
+            self._task_type_combo.blockSignals(True)
+            idx = self._task_type_combo.findData(task.task_type)
+            if idx >= 0:
+                self._task_type_combo.setCurrentIndex(idx)
+            self._task_type_combo.blockSignals(False)
+            self.repeat_spin.blockSignals(True)
+            self.repeat_spin.setValue(task.repeat)
+            self.repeat_spin.blockSignals(False)
+            # 刷新事件列表
+            self.event_list.refresh_events(task)
+
+    def _on_task_tab_changed(self, index: int):
+        """任务 Tab 切换。"""
+        self._show_task_properties()
+        self._update_event_list()
+
+    def _on_event_selected(self, row: int):
+        """事件列表选中变化。"""
+        if row < 0 or self._task_queue is None:
+            self._show_task_properties()
+            return
+        # 获取当前选中的任务
+        tab = self._task_tab.currentIndex()
+        task_type = "sequential" if tab == 0 else "independent"
+        lst = self.seq_task_list if tab == 0 else self.ind_task_list
+        tasks = self._tasks_of_type(task_type)
+        task_row = lst.currentRow()
+        if 0 <= task_row < len(tasks) and row < len(tasks[task_row].events):
+            event = tasks[task_row].events[row]
+            self._show_event_properties(event)
+        else:
+            self._show_task_properties()
+
+    def _update_event_list(self):
+        """根据当前选中的任务刷新事件列表。"""
+        if self._task_queue is None:
+            self.event_list.refresh_events(None)
+            return
+        tab = self._task_tab.currentIndex()
+        task_type = "sequential" if tab == 0 else "independent"
+        lst = self.seq_task_list if tab == 0 else self.ind_task_list
+        tasks = self._tasks_of_type(task_type)
+        row = lst.currentRow()
+        if 0 <= row < len(tasks):
+            self.event_list.refresh_events(tasks[row])
+        else:
+            self.event_list.refresh_events(None)
+
+    def _refresh_task_lists(self):
+        """刷新两侧任务列表 UI。"""
+        seq = self._tasks_of_type("sequential")
+        ind = self._tasks_of_type("independent")
+        self._refresh_list(self.seq_task_list, seq, "sequential")
+        self._refresh_list(self.ind_task_list, ind, "independent")
+
+    def _refresh_list(self, list_widget: QListWidget, tasks: list, task_type: str):
+        """刷新单个任务列表。"""
+        list_widget.blockSignals(True)
+        list_widget.clear()
+        for i, task in enumerate(tasks):
+            item = QListWidgetItem()
+            widget = TaskItemWidget(task, i, list_widget, self, task_type)
+            item.setSizeHint(widget.sizeHint())
+            list_widget.addItem(item)
+            list_widget.setItemWidget(item, widget)
+        list_widget.blockSignals(False)
+
+    def _select_last_task(self, task_type: str):
+        """选中最后一个任务。"""
+        if task_type == "sequential":
+            lst = self.seq_task_list
+        else:
+            lst = self.ind_task_list
+        count = lst.count()
+        if count > 0:
+            lst.setCurrentRow(count - 1)
+
+    def _get_selected_task(self):
+        """获取当前在事件列表中选中的 Task 对象（供 EventListWidget 调用）。"""
+        tab = self._task_tab.currentIndex()
+        task_type = "sequential" if tab == 0 else "independent"
+        lst = self.seq_task_list if tab == 0 else self.ind_task_list
+        tasks = self._tasks_of_type(task_type)
+        row = lst.currentRow()
+        if 0 <= row < len(tasks):
+            return tasks[row]
+        return None
+
+    def _on_task_type_changed(self, index: int):
+        """任务类型切换：同步迁移任务到对应列表。"""
+        if self._task_queue is None:
+            return
+        tab = self._task_tab.currentIndex()
+        task_type = "sequential" if tab == 0 else "independent"
+        lst = self.seq_task_list if tab == 0 else self.ind_task_list
+        tasks = self._tasks_of_type(task_type)
+        row = lst.currentRow()
+        if row < 0 or row >= len(tasks):
+            return
+        task = tasks[row]
+        new_type = self._task_type_combo.currentData()
+        if task.task_type == new_type:
+            return  # 没变
+        # 从 flat tasks 中找到实际对象并修改类型
+        flat_idx = self._task_queue.tasks.index(task)
+        self._task_queue.tasks[flat_idx].task_type = new_type
+        # 刷新列表并切换到目标页签
+        self._refresh_task_lists()
+        target_tab = 0 if new_type == "sequential" else 1
+        self._task_tab.setCurrentIndex(target_tab)
+        # 选中刚迁移的任务
+        target_lst = self.seq_task_list if target_tab == 0 else self.ind_task_list
+        target_lst.setCurrentRow(target_lst.count() - 1)
+
+    def _on_repeat_changed(self, value: int):
+        """重复次数变化。"""
+        if self._task_queue is None:
+            return
+        tab = self._task_tab.currentIndex()
+        task_type = "sequential" if tab == 0 else "independent"
+        lst = self.seq_task_list if tab == 0 else self.ind_task_list
+        tasks = self._tasks_of_type(task_type)
+        row = lst.currentRow()
+        if 0 <= row < len(tasks):
+            tasks[row].repeat = value
+
+    # ═══════════════════════════════════════════════════════════
+    # 对话框
+    # ═══════════════════════════════════════════════════════════
+
+    def _open_settings_dialog(self):
+        """打开设置对话框（占位）。"""
+        QMessageBox.information(self, "设置", "设置对话框（待实现）")
+
+    def _open_hotkey_dialog(self):
+        """打开快捷键设置对话框（占位）。"""
+        QMessageBox.information(self, "快捷键", "快捷键设置（待实现）")
+
+    def _on_dpi_scale_toggled(self, checked: bool):
+        """DPI 自适应缩放开关。"""
+        self.config.auto_dpi_scale = checked
+        self.config.save()
         if checked:
-            if self.block_wait_max_spin.value() < self.block_wait_min_spin.value():
-                self.block_wait_max_spin.setValue(self.block_wait_min_spin.value())
+            QMessageBox.information(
+                self, "自适应缩放",
+                "下次启动程序时生效。\n"
+                "请重启程序以应用缩放设置。"
+            )
+
+    def _restart_app(self):
+        """重启程序。"""
+        QApplication.quit()
+        # 使用 QProcess 重启
+        from PyQt5.QtCore import QProcess
+        QProcess.startDetached(sys.executable, sys.argv)
+
+    # ═══════════════════════════════════════════════════════════
+    # 导入 / 导出
+    # ═══════════════════════════════════════════════════════════
+
+    def _on_import_tasks(self):
+        """从文件导入任务配置。"""
+        from PyQt5.QtWidgets import QFileDialog
+        path, _ = QFileDialog.getOpenFileName(
+            self, "导入任务", "", "JSON 文件 (*.json)"
+        )
+        if not path:
+            return
+        try:
+            q = TaskQueue.load(path)
+            if q is not None:
+                self._task_queue = q
+                self._refresh_task_lists()
+                self._update_event_list()
+                self._status_log.setText(f"已导入: {path}")
+        except Exception as e:
+            QMessageBox.warning(self, "导入失败", f"无法导入任务配置:\n{e}")
+
+    def _on_export_tasks(self):
+        """导出任务配置到文件。"""
+        from PyQt5.QtWidgets import QFileDialog
+        path, _ = QFileDialog.getSaveFileName(
+            self, "导出任务", "tasks.json", "JSON 文件 (*.json)"
+        )
+        if not path:
+            return
+        try:
+            if self._task_queue is not None:
+                self._task_queue.save(path)
+                self._status_log.setText(f"已导出: {path}")
+        except Exception as e:
+            QMessageBox.warning(self, "导出失败", f"无法导出任务配置:\n{e}")
+
+    # ═══════════════════════════════════════════════════════════
+    # 表单初始化
+    # ═══════════════════════════════════════════════════════════
+
+    def _populate_form(self):
+        """从 config 填充 UI 表单字段。"""
+        self._window_title = self.config.window_title
+        self.title_btn.setText(f" {self._window_title}")
+
+        # 输入模式
+        idx = self.cmb_input_mode.findText(self.config.input_mode)
+        if idx >= 0:
+            self.cmb_input_mode.setCurrentIndex(idx)
+
+        # 快捷键
+        self.hotkey_checkbox.setChecked(self.config.hotkey_enabled)
+        hk = self.config.hotkey_toggle.capitalize()
+        idx = self.hotkey_combo.findText(hk, Qt.MatchFixedString)
+        if idx >= 0:
+            self.hotkey_combo.setCurrentIndex(idx)
+
+        self.debug_check.setChecked(self.config.debug)
+        self.dpi_scale_check.setChecked(self.config.auto_dpi_scale)
+
+        # 间隔（来自 TaskQueue）
+        if self._task_queue is not None:
+            self.min_interval_spin.setValue(self._task_queue.min_action_interval)
+            self.min_interval_random_check.setChecked(self._task_queue.min_action_interval_random)
+            self.min_interval_min_spin.setValue(self._task_queue.min_action_interval_min)
+            self.min_interval_max_spin.setValue(self._task_queue.min_action_interval_max)
+            self.cb_block_actions.setChecked(self._task_queue.block_actions_enabled)
+
+    def _load_task_queue_config(self):
+        """从文件加载任务队列配置。"""
+        try:
+            q = TaskQueue.load(TASK_QUEUE_CONFIG_PATH)
+            if q is not None:
+                self._task_queue = q
+            else:
+                self._task_queue = TaskQueue()
+        except Exception:
+            self._task_queue = TaskQueue()
+        self._refresh_task_lists()
+
+    # ═══════════════════════════════════════════════════════════
+    # 热键
+    # ═══════════════════════════════════════════════════════════
+
+    def _on_hotkey_toggled(self, checked: bool):
+        """全局热键开关。"""
+        self.config.hotkey_enabled = checked
+        self.hotkey_combo.setEnabled(checked)
+        if checked:
+            if not self._hotkey_signal_connected:
+                self._hotkey_mgr.hotkey_triggered.connect(self._on_hotkey_triggered)
+                self._hotkey_signal_connected = True
+            self._hotkey_mgr.set_hotkey(self.config.hotkey_toggle)
+        else:
+            self._hotkey_mgr.unhook()
+
+    def _on_hotkey_changed(self, text: str):
+        """热键选择变化。"""
+        if not text:
+            return
+        self.config.hotkey_toggle = text.lower()
+        if self.hotkey_checkbox.isChecked():
+            self._hotkey_mgr.set_hotkey(self.config.hotkey_toggle)
+
+    def _on_hotkey_triggered(self):
+        """热键触发：切换启动/停止。"""
+        if self.worker is not None and self.worker.isRunning():
+            self.on_stop()
+        else:
+            self.on_start()
+
+    # ═══════════════════════════════════════════════════════════
+    # 其他设置
+    # ═══════════════════════════════════════════════════════════
+
+    def _on_min_interval_random_toggled(self, checked: bool):
+        """最小动作间隔随机开关。"""
+        self._min_interval_min_widget.setVisible(checked)
+        self._min_interval_max_widget.setVisible(checked)
+
+    def _on_block_actions_toggled(self, checked: bool):
+        """屏蔽动作开关。"""
+        self._btn_add_block.setEnabled(checked)
+        self.block_scroll.setVisible(checked)
+
+    def _add_block_action(self):
+        """添加一个屏蔽动作条目。"""
+        w = BlockActionItemWidget()
+        self._block_flow_layout.insertWidget(
+            self._block_flow_layout.count() - 1, w
+        )
+        self._block_action_widgets.append(w)
 
     # ── 中栏 ──────────────────────────────────────────────────
 
@@ -703,6 +1190,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(header)
 
         self.event_list = EventListWidget(self)
+        self.event_list.currentRowChanged.connect(self._on_event_selected)
         layout.addWidget(self.event_list, 1)
         return widget
 
@@ -714,15 +1202,19 @@ class MainWindow(QMainWindow):
         scroll.setFrameShape(QScrollArea.NoFrame)
         scroll.setStyleSheet("QScrollArea { background: transparent; }")
 
-        widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setContentsMargins(3, 6, 6, 6)
-        layout.setSpacing(8)
+        self._right_stack = QStackedWidget()
+        self._right_stack.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self._right_stack.setMinimumWidth(0)
 
-        # ── 任务属性 ──────────────────────────────────────────
+        # ── Page 0: 任务属性 ────────────────────────────────
+        task_page = QWidget()
+        task_layout = QVBoxLayout(task_page)
+        task_layout.setContentsMargins(3, 6, 6, 6)
+        task_layout.setSpacing(8)
+
         prop_label = QLabel("■ 属性")
         prop_label.setStyleSheet(_SECTION_TITLE_STYLE)
-        layout.addWidget(prop_label)
+        task_layout.addWidget(prop_label)
 
         prop_frame = QFrame()
         prop_frame.setStyleSheet(
@@ -732,31 +1224,29 @@ class MainWindow(QMainWindow):
         prop_layout.setContentsMargins(8, 8, 8, 8)
         prop_layout.setSpacing(6)
 
-        type_row = QHBoxLayout()
-        type_row.addWidget(QLabel("类型:"))
+        type_row = QFormLayout()
+        type_row.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
         self._task_type_combo = QComboBox()
-        self._task_type_combo.addItem("顺序", "sequential")
+        self._task_type_combo.addItem("串行", "sequential")
         self._task_type_combo.addItem("独立", "independent")
         self._task_type_combo.currentIndexChanged.connect(self._on_task_type_changed)
-        type_row.addWidget(self._task_type_combo)
-        type_row.addStretch()
+        type_row.addRow("类型:", self._task_type_combo)
         prop_layout.addLayout(type_row)
 
-        repeat_row = QHBoxLayout()
-        repeat_row.addWidget(QLabel("重复:"))
+        repeat_row = QFormLayout()
+        repeat_row.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
         self.repeat_spin = QSpinBox()
         self.repeat_spin.setRange(1, 999)
         self.repeat_spin.valueChanged.connect(self._on_repeat_changed)
-        repeat_row.addWidget(self.repeat_spin)
-        repeat_row.addStretch()
+        repeat_row.addRow("重复:", self.repeat_spin)
         prop_layout.addLayout(repeat_row)
 
-        layout.addWidget(prop_frame)
+        task_layout.addWidget(prop_frame)
 
-        # ── 最小动作间隔 ──────────────────────────────────────
+        # 最小动作间隔
         interval_label = QLabel("■ 最小动作间隔")
         interval_label.setStyleSheet(_SECTION_TITLE_STYLE)
-        layout.addWidget(interval_label)
+        task_layout.addWidget(interval_label)
 
         interval_frame = QFrame()
         interval_frame.setStyleSheet(
@@ -801,12 +1291,12 @@ class MainWindow(QMainWindow):
         self._min_interval_max_widget.setVisible(False)
         interval_layout.addWidget(self._min_interval_max_widget)
 
-        layout.addWidget(interval_frame)
+        task_layout.addWidget(interval_frame)
 
-        # ── 屏蔽动作 ──────────────────────────────────────────
+        # 屏蔽动作
         block_label = QLabel("■ 屏蔽动作")
         block_label.setStyleSheet(_SECTION_TITLE_STYLE)
-        layout.addWidget(block_label)
+        task_layout.addWidget(block_label)
 
         block_frame = QFrame()
         block_frame.setStyleSheet(
@@ -845,12 +1335,12 @@ class MainWindow(QMainWindow):
         block_layout.addWidget(self.block_scroll)
 
         self._block_action_widgets = []
-        layout.addWidget(block_frame)
+        task_layout.addWidget(block_frame)
 
-        # ── 导入 / 导出 ───────────────────────────────────────
+        # 导入 / 导出
         io_label = QLabel("■ 数据")
         io_label.setStyleSheet(_SECTION_TITLE_STYLE)
-        layout.addWidget(io_label)
+        task_layout.addWidget(io_label)
 
         io_frame = QFrame()
         io_frame.setStyleSheet(
@@ -879,11 +1369,310 @@ class MainWindow(QMainWindow):
         io_layout.addWidget(btn_export)
 
         io_layout.addStretch()
-        layout.addWidget(io_frame)
+        task_layout.addWidget(io_frame)
 
-        layout.addStretch()
-        scroll.setWidget(widget)
+        task_layout.addStretch()
+
+        # ── Page 1: 动作属性（可编辑） ──────────────────────
+        event_page = QWidget()
+        event_layout = QVBoxLayout(event_page)
+        event_layout.setContentsMargins(3, 6, 6, 6)
+        event_layout.setSpacing(8)
+
+        event_prop_label = QLabel("■ 动作属性")
+        event_prop_label.setStyleSheet(_SECTION_TITLE_STYLE)
+        event_layout.addWidget(event_prop_label)
+
+        event_prop_frame = QFrame()
+        event_prop_frame.setStyleSheet(
+            "QFrame { background: #1a1a1a; border: 1px solid #3a3a3a; border-radius: 6px; }"
+        )
+        event_prop_layout = QFormLayout(event_prop_frame)
+        event_prop_layout.setContentsMargins(8, 8, 8, 8)
+        event_prop_layout.setSpacing(6)
+        event_prop_layout.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+
+        # 事件类型
+        self._event_type_combo = QComboBox()
+        self._event_type_combo.addItem("↕ 单击", "keyclick")
+        self._event_type_combo.addItem("↓ 按下", "keydown")
+        self._event_type_combo.addItem("↑ 松开", "keyup")
+        self._event_type_combo.addItem("⏱ 等待", "wait")
+        self._event_type_combo.addItem("⏱ 随机等待", "wait_random")
+        self._event_type_combo.currentIndexChanged.connect(self._on_event_type_changed)
+        event_prop_layout.addRow("类型:", self._event_type_combo)
+
+        # 按键编辑（用于 keydown/keyup/keyclick）
+        self._event_key_widget = QWidget()
+        event_key_layout = QHBoxLayout(self._event_key_widget)
+        event_key_layout.setContentsMargins(0, 0, 0, 0)
+        event_key_layout.setSpacing(2)
+        self._event_key1 = QComboBox()
+        self._event_key1.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        _populate_key_combo(self._event_key1)
+        event_key_layout.addWidget(self._event_key1)
+        plus1 = QLabel("+")
+        plus1.setStyleSheet("color: #888; font-size: 12px; font-weight: 700; padding: 0 1px;")
+        plus1.setFixedWidth(12)
+        event_key_layout.addWidget(plus1)
+        self._event_key2 = QComboBox()
+        self._event_key2.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        _populate_key_combo(self._event_key2)
+        event_key_layout.addWidget(self._event_key2)
+        plus2 = QLabel("+")
+        plus2.setStyleSheet("color: #888; font-size: 12px; font-weight: 700; padding: 0 1px;")
+        plus2.setFixedWidth(12)
+        event_key_layout.addWidget(plus2)
+        self._event_key3 = QComboBox()
+        self._event_key3.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        _populate_key_combo(self._event_key3)
+        event_key_layout.addWidget(self._event_key3)
+        event_prop_layout.addRow("按键:", self._event_key_widget)
+
+        # 等待编辑（用于 wait/wait_random）
+        self._event_wait_widget = QWidget()
+        event_wait_layout = QVBoxLayout(self._event_wait_widget)
+        event_wait_layout.setContentsMargins(0, 0, 0, 0)
+        event_wait_layout.setSpacing(4)
+
+        wait_single_row = QHBoxLayout()
+        self._event_wait_spin = QSpinBox()
+        self._event_wait_spin.setRange(10, 999999)
+        self._event_wait_spin.setValue(500)
+        self._event_wait_spin.setSuffix(" ms")
+        wait_single_row.addWidget(self._event_wait_spin)
+        wait_single_row.addStretch()
+        event_wait_layout.addLayout(wait_single_row)
+
+        wait_range_row = QHBoxLayout()
+        self._event_wait_min = QSpinBox()
+        self._event_wait_min.setRange(10, 999999)
+        self._event_wait_min.setValue(200)
+        self._event_wait_min.setSuffix(" ms")
+        self._event_wait_min.setPrefix("最小 ")
+        wait_range_row.addWidget(self._event_wait_min)
+        self._event_wait_max = QSpinBox()
+        self._event_wait_max.setRange(10, 999999)
+        self._event_wait_max.setValue(500)
+        self._event_wait_max.setSuffix(" ms")
+        self._event_wait_max.setPrefix("最大 ")
+        wait_range_row.addWidget(self._event_wait_max)
+        wait_range_row.addStretch()
+        self._event_wait_range_widget = QWidget()
+        self._event_wait_range_widget.setLayout(wait_range_row)
+        self._event_wait_range_widget.setVisible(False)
+        event_wait_layout.addWidget(self._event_wait_range_widget)
+
+        event_prop_layout.addRow("等待:", self._event_wait_widget)
+
+        # 同步按钮
+        sync_btn = QPushButton("✓ 应用修改")
+        sync_btn.setStyleSheet(
+            "QPushButton { background: #6b8cff; color: white; border: none; "
+            "border-radius: 4px; padding: 6px 12px; font-size: 12px; font-weight: 600; }"
+            "QPushButton:hover { background: #5a7cef; }"
+        )
+        sync_btn.clicked.connect(self._on_sync_event)
+        event_prop_layout.addRow("", sync_btn)
+
+        event_layout.addWidget(event_prop_frame)
+        event_layout.addStretch()
+
+        self._editing_event: TaskEvent | None = None
+
+        # ── 堆叠 ───────────────────────────────────────────────
+        self._right_stack.addWidget(task_page)   # index 0
+        self._right_stack.addWidget(event_page)  # index 1
+        self._right_stack.setCurrentIndex(0)
+
+        scroll.setWidget(self._right_stack)
         return scroll
+
+    def _show_task_properties(self):
+        """右侧切换到任务属性面板。"""
+        self._right_stack.setCurrentIndex(0)
+
+    def _show_event_properties(self, event: TaskEvent):
+        """右侧切换到动作属性面板并加载事件配置到编辑控件。"""
+        if not event:
+            return
+        self._editing_event = event
+
+        # 加载事件类型
+        idx = self._event_type_combo.findData(event.type)
+        if idx >= 0:
+            self._event_type_combo.blockSignals(True)
+            self._event_type_combo.setCurrentIndex(idx)
+            self._event_type_combo.blockSignals(False)
+
+        self._sync_event_type_visiblity(event.type)
+
+        # 加载按键
+        keys = event.keys if event.keys else ([event.key] if event.key else [])
+        for i, combo in enumerate([self._event_key1, self._event_key2, self._event_key3]):
+            if i < len(keys):
+                ci = combo.findText(keys[i])
+                combo.setCurrentIndex(ci if ci >= 0 else 0)
+            else:
+                combo.setCurrentIndex(0)
+
+        # 加载等待
+        self._event_wait_spin.setValue(event.ms if event.type == "wait" else 500)
+        self._event_wait_min.setValue(event.min_ms if event.type == "wait_random" else 100)
+        self._event_wait_max.setValue(event.max_ms if event.type == "wait_random" else 300)
+
+        self._right_stack.setCurrentIndex(1)
+
+    def _on_event_type_changed(self, index: int):
+        """右侧动作类型改变，切换按键/等待控件的显隐。"""
+        event_type = self._event_type_combo.currentData()
+        self._sync_event_type_visiblity(event_type)
+        # 如果是新插入的临时事件，自动应用类型
+        if self._editing_event is not None:
+            self._editing_event.type = event_type
+
+    def _sync_event_type_visiblity(self, event_type: str):
+        """根据事件类型显示/隐藏按键和等待编辑区。"""
+        is_key = event_type in ("keydown", "keyup", "keyclick")
+        is_wait = event_type == "wait"
+        is_wait_random = event_type == "wait_random"
+        self._event_key_widget.setVisible(is_key)
+        self._event_wait_widget.setVisible(is_wait or is_wait_random)
+        self._event_wait_spin.setVisible(is_wait)
+        self._event_wait_range_widget.setVisible(is_wait_random)
+
+    def _on_sync_event(self):
+        """将右侧编辑控件的值写回到当前编辑的事件。"""
+        ev = self._editing_event
+        if ev is None:
+            return
+        ev.type = self._event_type_combo.currentData()
+
+        if ev.type in ("keydown", "keyup", "keyclick"):
+            keys = []
+            for combo in [self._event_key1, self._event_key2, self._event_key3]:
+                t = combo.currentText()
+                if t and t != "空":
+                    keys.append(t)
+            ev.keys = keys
+            ev.key = keys[0] if keys else ""
+        elif ev.type == "wait":
+            ev.ms = self._event_wait_spin.value()
+        elif ev.type == "wait_random":
+            ev.min_ms = self._event_wait_min.value()
+            ev.max_ms = self._event_wait_max.value()
+
+        # 刷新事件列表显示
+        tab = self._task_tab.currentIndex()
+        task_type = "sequential" if tab == 0 else "independent"
+        lst = self.seq_task_list if tab == 0 else self.ind_task_list
+        tasks = self._tasks_of_type(task_type)
+        task_row = lst.currentRow()
+        if 0 <= task_row < len(tasks):
+            self.event_list.refresh_events(tasks[task_row])
+
+    # ═══════════════════════════════════════════════════════════
+    # 窗口搜索器
+    # ═══════════════════════════════════════════════════════════
+
+    def _show_window_picker(self):
+        """弹出系统窗口搜索选择器。"""
+        from PyQt5.QtWidgets import QDialog, QVBoxLayout, QLineEdit, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView
+        from PyQt5.QtCore import QTimer
+        from gameassistant.platform.window_win import list_windows
+
+        if self._window_picker_dialog is not None:
+            self._window_picker_dialog.close()
+            self._window_picker_dialog = None
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("选择目标窗口")
+        dlg.resize(420, 380)
+        dlg.setStyleSheet("QDialog { background: #1e1e1e; }")
+        dlg.setWindowFlags(dlg.windowFlags() & ~Qt.WindowContextHelpButtonHint)
+
+        layout = QVBoxLayout(dlg)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(8)
+
+        # 搜索框
+        search = QLineEdit()
+        search.setPlaceholderText("输入关键词搜索窗口...")
+        search.setStyleSheet(
+            "QLineEdit { background: #2a2a2a; color: #e0e0e0; border: 1px solid #3a3a3a; "
+            "border-radius: 4px; padding: 6px 10px; font-size: 12px; }"
+        )
+        layout.addWidget(search)
+
+        # 表格
+        table = QTableWidget(0, 2)
+        table.setHorizontalHeaderLabels(["窗口名称", "PID"])
+        table.horizontalHeader().setStretchLastSection(False)
+        table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        table.setSelectionMode(QAbstractItemView.SingleSelection)
+        table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        table.setAlternatingRowColors(False)
+        table.setShowGrid(False)
+        table.setStyleSheet(
+            "QTableWidget { background: #121212; border: 1px solid #3a3a3a; "
+            "border-radius: 4px; color: #e0e0e0; font-size: 12px; } "
+            "QTableWidget::item:selected { background: #2a3a6a; } "
+            "QHeaderView::section { background: #1e1e1e; color: #888; "
+            "border: none; padding: 4px; font-size: 11px; }"
+        )
+        table.verticalHeader().setVisible(False)
+        layout.addWidget(table)
+
+        def refresh_list(filter_text: str = ""):
+            """获取窗口列表并填充表格。"""
+            all_windows = list_windows()
+            table.setRowCount(0)
+            for hwnd, title in all_windows:
+                if filter_text and filter_text.lower() not in title.lower():
+                    continue
+                row = table.rowCount()
+                table.insertRow(row)
+                name_item = QTableWidgetItem(title)
+                name_item.setData(Qt.UserRole, hwnd)
+                table.setItem(row, 0, name_item)
+                pid_item = QTableWidgetItem(str(hwnd))
+                pid_item.setTextAlignment(Qt.AlignCenter)
+                table.setItem(row, 1, pid_item)
+
+        refresh_list()
+
+        # 搜索过滤（debounce 300ms）
+        debounce = QTimer()
+        debounce.setSingleShot(True)
+        debounce.setInterval(300)
+
+        def on_search_changed(text: str):
+            debounce.start()
+        debounce.timeout.connect(lambda: refresh_list(search.text()))
+
+        search.textChanged.connect(on_search_changed)
+
+        # 双击 / 回车选择
+        def on_accept():
+            row = table.currentRow()
+            if row < 0:
+                return
+            name_item = table.item(row, 0)
+            if name_item is None:
+                return
+            title = name_item.text()
+            if title:
+                self._window_title = title
+                self.title_btn.setText(f" {title}")
+            dlg.accept()
+
+        table.cellDoubleClicked.connect(lambda r, c: on_accept())
+        search.returnPressed.connect(lambda: on_accept() if table.currentRow() >= 0 else None)
+
+        dlg.exec_()
+        self._window_picker_dialog = None
 
     # ═══════════════════════════════════════════════════════════
     # 构建：状态栏（区 4）
@@ -953,3 +1742,120 @@ class MainWindow(QMainWindow):
     def _toggle_log_panel(self):
         visible = not self._log_panel.isVisible()
         self._log_panel.setVisible(visible)
+
+    # ═══════════════════════════════════════════════════════════
+    # 预览：定时截图刷新
+    # ═══════════════════════════════════════════════════════════
+
+    def _on_preview_tick(self):
+        """定时器回调：捕获窗口画面并刷新预览控件。"""
+        if not self._preview_capturing:
+            return
+
+        # 获取/刷新窗口句柄
+        if not self._preview_hwnd:
+            title = self._window_title
+            if not title:
+                return
+            self._preview_hwnd = win32gui.FindWindow(None, title)
+            if not self._preview_hwnd:
+                return
+
+        hwnd = self._preview_hwnd
+        if not win32gui.IsWindow(hwnd):
+            self._preview_hwnd = 0
+            if self._preview_widget:
+                self._preview_widget.set_error("窗口已关闭")
+            return
+
+        try:
+            # 捕获窗口客户区
+            left, top, right, bottom = win32gui.GetClientRect(hwnd)
+            w, h = right - left, bottom - top
+            if w <= 0 or h <= 0:
+                return
+
+            hwnd_dc = win32gui.GetWindowDC(hwnd)
+            mfc_dc = win32ui.CreateDCFromHandle(hwnd_dc)
+            save_dc = mfc_dc.CreateCompatibleDC()
+
+            bitmap = win32ui.CreateBitmap()
+            bitmap.CreateCompatibleBitmap(mfc_dc, w, h)
+            save_dc.SelectObject(bitmap)
+
+            save_dc.BitBlt((0, 0), (w, h), mfc_dc, (0, 0), win32con.SRCCOPY)
+
+            bmp_info = bitmap.GetInfo()
+            bmp_bits = bitmap.GetBitmapBits(True)
+            img = Image.frombuffer(
+                "RGB",
+                (bmp_info["bmWidth"], bmp_info["bmHeight"]),
+                bmp_bits, "raw", "BGRX", 0, 1,
+            )
+
+            save_dc.DeleteDC()
+            mfc_dc.DeleteDC()
+            win32gui.ReleaseDC(hwnd, hwnd_dc)
+            win32gui.DeleteObject(bitmap.GetHandle())
+
+            # 转为 QImage 并显示
+            img = img.convert("RGB")
+            data = img.tobytes("raw", "RGB")
+            qimg = QImage(data, img.width, img.height, QImage.Format_RGB888)
+            self._last_frame = qimg
+            if self._preview_widget:
+                self._preview_widget.set_image(qimg)
+
+        except Exception as e:
+            logger.debug("预览截图失败: %s", e)
+
+    def _toggle_preview(self):
+        """切换画面预览面板的显示。"""
+        if self._preview_widget and self._preview_widget.isVisible():
+            # 关闭预览
+            self._preview_capturing = False
+            self._preview_timer.stop()
+            self._preview_widget.setVisible(False)
+            # 从布局中移除
+            parent_layout = self._preview_widget.parent().layout()
+            if parent_layout:
+                parent_layout.removeWidget(self._preview_widget)
+            self._preview_widget = None
+            self._preview_hwnd = 0
+        else:
+            # 从中央分割区左侧面板获取父容器
+            splitter = self.findChild(QSplitter)
+            if not splitter:
+                return
+            left_panel = splitter.widget(0)
+            if not left_panel:
+                return
+
+            # 创建预览控件插入左面板顶部
+            self._preview_widget = PreviewWidget()
+            self._preview_widget.setMinimumHeight(120)
+            layout = left_panel.layout()
+            if layout:
+                layout.insertWidget(0, self._preview_widget, 1)
+
+            # 获取窗口标题并查找句柄
+            title = self._window_title
+            if title:
+                self._preview_hwnd = win32gui.FindWindow(None, title)
+
+            # 启动定时器
+            self._preview_capturing = True
+            interval = max(33, int(1000 / max(1, self._preview_fps_spin.value())))
+            self._preview_timer.setInterval(interval)
+            self._preview_timer.start()
+
+    def _toggle_debug_log(self):
+        """切换调试日志面板。"""
+        self._toggle_log_panel()
+
+    def _reset_layout(self):
+        """重置窗口布局为默认比例。"""
+        splitter = self.findChild(QSplitter)
+        if splitter:
+            total = splitter.width() or 800
+            splitter.setSizes([int(total * 0.25), int(total * 0.5), int(total * 0.25)])
