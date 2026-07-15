@@ -65,6 +65,8 @@ class SanguoBot:
         self._pressed_keys: set[int] = set()
         # 顺序类型任务的执行索引（循环跟踪当前该执行哪一个顺序任务）
         self._seq_task_index: int = 0
+        # 独立任务执行状态：{task_id: {"event_idx": int, "repeat_idx": int, "wait_until": float}}
+        self._ind_task_states: dict[int, dict] = {}
 
     def run(self) -> None:
         """主循环入口，捕获 Ctrl+C 优雅退出。"""
@@ -263,13 +265,14 @@ class SanguoBot:
                         self._running = False
 
         # ------------------------------------------------------------------
-        # 独立类型任务：每个任务独立自我循环
+        # 独立类型任务：每个任务每 tick 只推进一个 event（时间分片）
+        # 与顺序任务并行执行，互不阻塞
         # ------------------------------------------------------------------
         ind_tasks = self.task_queue.get_independent_enabled()
         for task in ind_tasks:
             if not self._running:
                 return
-            self._execute_task_events(task, mode)
+            self._advance_independent_task(task, mode)
 
     def _execute_task_events(self, task: Task, mode: str) -> None:
         """执行单个任务的所有事件（含重复次数）。
@@ -319,3 +322,86 @@ class SanguoBot:
                     if interval_ms > 0:
                         if not self._interruptible_sleep(interval_ms / 1000.0):
                             return
+
+    def _advance_independent_task(self, task: Task, mode: str) -> None:
+        """独立任务每 tick 推进一个事件（时间分片调度）。
+
+        每个独立任务拥有独立的状态跟踪，每个 tick 只执行一个事件，
+        这样独立任务之间以及与顺序任务之间可以"并发"执行——每个 tick
+        各推进一小步，不会互相阻塞。
+
+        Args:
+            task: 独立任务对象。
+            mode: 输入模式。
+        """
+        task_id = id(task)
+        state = self._ind_task_states.get(task_id)
+        if state is None:
+            # 初始化任务状态
+            state = {"event_idx": 0, "repeat_idx": 0, "wait_until": 0.0}
+            self._ind_task_states[task_id] = state
+
+        # 如果当前在等待中，检查是否已到时间
+        if state["wait_until"] > time.time():
+            return  # 等待尚未结束，本次 tick 跳过
+
+        state["wait_until"] = 0.0  # 清除等待标志
+
+        events = task.events
+        if not events:
+            return
+
+        # 获取当前要执行的事件
+        event = events[state["event_idx"]]
+
+        # 检查屏蔽
+        if self.task_queue.is_event_blocked(event):
+            pass  # 被屏蔽的事件直接跳过，不消耗 tick
+        else:
+            etype = event.type
+            if etype == "keydown":
+                vk_codes = event.vk_codes
+                logger.debug("[独立] \u2193 %s", event.get_display_text())
+                send_keys_down(self.hwnd, vk_codes, mode=mode)
+                self._pressed_keys.update(vk_codes)
+            elif etype == "keyup":
+                vk_codes = event.vk_codes
+                logger.debug("[独立] \u2191 %s", event.get_display_text())
+                send_keys_up(self.hwnd, vk_codes, mode=mode)
+                for vk in vk_codes:
+                    self._pressed_keys.discard(vk)
+            elif etype == "keyclick":
+                vk_codes = event.vk_codes
+                logger.debug("[独立] \u2195 %s", event.get_display_text())
+                send_keys(self.hwnd, vk_codes, mode=mode)
+            elif etype == "wait":
+                wait_s = event.ms / 1000.0
+                logger.debug("[独立] \u23F1 等待 %dms", event.ms)
+                state["wait_until"] = time.time() + wait_s
+                # 如果 wait 很短(< tick 间隔)，立即完成等待，继续推进
+                # 否则返回，等下一个 tick 到来时检查 wait_until
+                if state["wait_until"] > time.time():
+                    return  # 需要等待，下个 tick 再继续
+            elif etype == "wait_random":
+                wait_s = random.uniform(event.min_ms, event.max_ms) / 1000.0
+                logger.debug("[独立] \u23F1 随机等待 %.0fms", wait_s * 1000)
+                state["wait_until"] = time.time() + wait_s
+                if state["wait_until"] > time.time():
+                    return
+            if etype in ("keydown", "keyup", "keyclick"):
+                interval_ms = self.task_queue.get_action_interval_ms()
+                if interval_ms > 0:
+                    state["wait_until"] = time.time() + (interval_ms / 1000.0)
+
+        # 推进到下一个事件
+        state["event_idx"] += 1
+
+        # 检查当前 repeat 轮次是否完成
+        if state["event_idx"] >= len(events):
+            state["event_idx"] = 0
+            state["repeat_idx"] += 1
+            # 检查所有 repeat 轮次是否完成
+            if state["repeat_idx"] >= task.repeat:
+                state["repeat_idx"] = 0  # 独立任务无限循环
+                logger.debug("[独立] 任务 '%s' 一轮完成，继续循环", task.name)
+
