@@ -39,7 +39,7 @@ from PyQt5.QtWidgets import (
     QListWidget, QListWidgetItem, QMainWindow, QMessageBox,
     QPushButton, QScrollArea, QSpinBox, QSplitter, QStackedWidget,
     QTextEdit, QVBoxLayout, QWidget, QInputDialog, QToolButton,
-    QTabWidget, QSizePolicy,
+    QTabWidget, QSizePolicy, QDialog,
 )
 
 import win32gui
@@ -163,6 +163,7 @@ class MainWindow(QMainWindow):
         # ── 初始化 ────────────────────────────────────────────
         self._populate_form()
         self._load_task_queue_config()
+        self.__init_log_panel(root_layout)
 
     # ═══════════════════════════════════════════════════════════
     # 构建：标题栏（区 1）
@@ -342,12 +343,19 @@ class MainWindow(QMainWindow):
                 return True, 0
 
             if msg.message == WM_NCHITTEST:
-                # lParam 低位=鼠标X，高位=鼠标Y（屏幕坐标，有符号16位）
+                # lParam 低位=鼠标X，高位=鼠标Y（屏幕坐标，物理像素）
                 lparam = msg.lParam
-                x = ctypes.c_int16(lparam & 0xFFFF).value
-                y = ctypes.c_int16((lparam >> 16) & 0xFFFF).value
+                x_phys = ctypes.c_int16(lparam & 0xFFFF).value
+                y_phys = ctypes.c_int16((lparam >> 16) & 0xFFFF).value
 
+                # DPI 缩放补偿：WM_NCHITTEST 坐标是物理像素，Qt 坐标是逻辑像素
                 from PyQt5.QtCore import QPoint
+                from PyQt5.QtWidgets import QApplication
+                screen = QApplication.primaryScreen()
+                ratio = screen.devicePixelRatio() if screen else 1.0
+                x = int(x_phys / ratio)
+                y = int(y_phys / ratio)
+
                 local_pos = self.mapFromGlobal(QPoint(x, y))
 
                 # 边缘缩放检测
@@ -1018,8 +1026,177 @@ class MainWindow(QMainWindow):
     # ═══════════════════════════════════════════════════════════
 
     def _open_settings_dialog(self):
-        """打开设置对话框（占位）。"""
-        QMessageBox.information(self, "设置", "设置对话框（待实现）")
+        """打开设置对话框：全局配置、截图方案、DPI 适配等。"""
+        dlg = QDialog(self)
+        dlg.setWindowTitle("设置")
+        dlg.resize(440, 360)
+        dlg.setStyleSheet("QDialog { background: #1e1e1e; }")
+        dlg.setWindowFlags(dlg.windowFlags() & ~Qt.WindowContextHelpButtonHint)
+        layout = QVBoxLayout(dlg)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
+
+        # ── 配置管理 ──────────────────────────────────────
+        cfg_label = QLabel("■ 配置管理")
+        cfg_label.setStyleSheet(_SECTION_TITLE_STYLE)
+        layout.addWidget(cfg_label)
+
+        cfg_frame = QFrame()
+        cfg_frame.setStyleSheet(
+            "QFrame { background: #1a1a1a; border: 1px solid #3a3a3a; border-radius: 6px; }"
+        )
+        cfg_layout = QHBoxLayout(cfg_frame)
+        cfg_layout.setContentsMargins(8, 8, 8, 8)
+        cfg_layout.setSpacing(8)
+
+        btn_import = QPushButton("📥 导入配置")
+        btn_import.setStyleSheet(
+            "QPushButton { background: #2a2a2a; color: #e0e0e0; border: 1px solid #3a3a3a; "
+            "border-radius: 4px; padding: 6px 12px; font-size: 12px; } "
+            "QPushButton:hover { background: #3a3a3a; border-color: #6b8cff; }"
+        )
+        btn_import.clicked.connect(self._on_import_config)
+        cfg_layout.addWidget(btn_import)
+
+        btn_export = QPushButton("📤 导出配置")
+        btn_export.setStyleSheet(
+            "QPushButton { background: #2a2a2a; color: #e0e0e0; border: 1px solid #3a3a3a; "
+            "border-radius: 4px; padding: 6px 12px; font-size: 12px; } "
+            "QPushButton:hover { background: #3a3a3a; border-color: #6b8cff; }"
+        )
+        btn_export.clicked.connect(self._on_export_config)
+        cfg_layout.addWidget(btn_export)
+
+        cfg_layout.addStretch()
+        layout.addWidget(cfg_frame)
+
+        # ── 画面截图方案 ──────────────────────────────────
+        cap_label = QLabel("■ 画面截图方案")
+        cap_label.setStyleSheet(_SECTION_TITLE_STYLE)
+        layout.addWidget(cap_label)
+
+        cap_frame = QFrame()
+        cap_frame.setStyleSheet(
+            "QFrame { background: #1a1a1a; border: 1px solid #3a3a3a; border-radius: 6px; }"
+        )
+        cap_layout = QVBoxLayout(cap_frame)
+        cap_layout.setContentsMargins(8, 8, 8, 8)
+        cap_layout.setSpacing(6)
+
+        self._capture_method_combo = QComboBox()
+        for name in CAPTURE_METHODS:
+            self._capture_method_combo.addItem(name)
+        # 尝试从 config 读取已有设置
+        saved_method = getattr(self.config, "_capture_method", "")
+        if saved_method:
+            idx = self._capture_method_combo.findText(saved_method)
+            if idx >= 0:
+                self._capture_method_combo.setCurrentIndex(idx)
+        self._capture_method_combo.setStyleSheet(
+            "QComboBox { background: #2a2a2a; color: #e0e0e0; border: 1px solid #3a3a3a; "
+            "border-radius: 4px; padding: 4px 8px; font-size: 12px; }"
+        )
+        cap_layout.addWidget(self._capture_method_combo)
+
+        cap_desc = QLabel(
+            "当前方案仅影响画面预览功能。\n"
+            "PrintWindow 系列可后台截图，BitBlt 系列速度更快。"
+        )
+        cap_desc.setStyleSheet("color: #888; font-size: 11px;")
+        cap_layout.addWidget(cap_desc)
+        layout.addWidget(cap_frame)
+
+        # ── 分辨率适配 ────────────────────────────────────
+        dpi_label = QLabel("■ 分辨率适配")
+        dpi_label.setStyleSheet(_SECTION_TITLE_STYLE)
+        layout.addWidget(dpi_label)
+
+        dpi_frame = QFrame()
+        dpi_frame.setStyleSheet(
+            "QFrame { background: #1a1a1a; border: 1px solid #3a3a3a; border-radius: 6px; }"
+        )
+        dpi_layout = QVBoxLayout(dpi_frame)
+        dpi_layout.setContentsMargins(8, 8, 8, 8)
+        dpi_layout.setSpacing(6)
+
+        self._settings_dpi_check = QCheckBox("启用屏幕自适应 DPI 缩放")
+        self._settings_dpi_check.setChecked(self.config.auto_dpi_scale)
+        self._settings_dpi_check.setStyleSheet("color: #e0e0e0; font-size: 12px;")
+        dpi_layout.addWidget(self._settings_dpi_check)
+
+        dpi_desc = QLabel("关闭后使用系统默认 DPI 行为，适合低分辨率屏幕。\n需重启应用生效。")
+        dpi_desc.setStyleSheet("color: #888; font-size: 11px;")
+        dpi_layout.addWidget(dpi_desc)
+        layout.addWidget(dpi_frame)
+
+        layout.addStretch()
+
+        # ── 底部按钮 ──────────────────────────────────────
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        btn_save = QPushButton("保存设置")
+        btn_save.setStyleSheet(
+            "QPushButton { background: #6b8cff; color: white; border: none; "
+            "border-radius: 4px; padding: 8px 20px; font-size: 13px; font-weight: 600; }"
+            "QPushButton:hover { background: #5a7cef; }"
+        )
+        def _on_settings_save():
+            old_dpi = self.config.auto_dpi_scale
+            new_dpi = self._settings_dpi_check.isChecked()
+            self.config.auto_dpi_scale = new_dpi
+            # 持久化截图方案
+            cap_name = self._capture_method_combo.currentText()
+            self.config._capture_method = cap_name
+            self.config.save()
+            self._status_log.setText("设置已保存")
+            dlg.accept()
+            # DPI 变更 → 询问重启
+            if old_dpi != new_dpi:
+                ret = QMessageBox.question(
+                    self, "重启应用",
+                    "分辨率适配设置已更改，需要重启应用才能生效。\n是否立即重启？",
+                    QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes
+                )
+                if ret == QMessageBox.Yes:
+                    self._restart_app()
+        btn_save.clicked.connect(_on_settings_save)
+        btn_layout.addWidget(btn_save)
+        layout.addLayout(btn_layout)
+
+        dlg.exec_()
+
+    def _on_import_config(self):
+        """导入全局配置文件。"""
+        from PyQt5.QtWidgets import QFileDialog
+        path, _ = QFileDialog.getOpenFileName(
+            self, "导入配置", "", "JSON 文件 (*.json)"
+        )
+        if not path:
+            return
+        try:
+            new_cfg = BotConfig.load(path)
+            self.config = new_cfg
+            self._populate_form()
+            self._status_log.setText(f"配置已导入: {path}")
+        except Exception as e:
+            QMessageBox.warning(self, "导入失败", f"无法导入配置:\n{e}")
+
+    def _on_export_config(self):
+        """导出全局配置文件。"""
+        from PyQt5.QtWidgets import QFileDialog
+        from gameassistant.paths import get_config_path
+        src = get_config_path()
+        path, _ = QFileDialog.getSaveFileName(
+            self, "导出配置", "config.json", "JSON 文件 (*.json)"
+        )
+        if not path:
+            return
+        try:
+            import shutil
+            shutil.copy2(src, path)
+            self._status_log.setText(f"配置已导出: {path}")
+        except Exception as e:
+            QMessageBox.warning(self, "导出失败", f"无法导出配置:\n{e}")
 
     def _open_hotkey_dialog(self):
         """打开快捷键设置对话框（占位）。"""
@@ -1200,6 +1377,7 @@ class MainWindow(QMainWindow):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QScrollArea.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         scroll.setStyleSheet("QScrollArea { background: transparent; }")
 
         self._right_stack = QStackedWidget()
@@ -1208,6 +1386,7 @@ class MainWindow(QMainWindow):
 
         # ── Page 0: 任务属性 ────────────────────────────────
         task_page = QWidget()
+        task_page.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Expanding)
         task_layout = QVBoxLayout(task_page)
         task_layout.setContentsMargins(3, 6, 6, 6)
         task_layout.setSpacing(8)
@@ -1375,6 +1554,7 @@ class MainWindow(QMainWindow):
 
         # ── Page 1: 动作属性（可编辑） ──────────────────────
         event_page = QWidget()
+        event_page.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Expanding)
         event_layout = QVBoxLayout(event_page)
         event_layout.setContentsMargins(3, 6, 6, 6)
         event_layout.setSpacing(8)
