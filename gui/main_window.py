@@ -401,13 +401,10 @@ class MainWindow(QMainWindow):
         act.triggered.connect(self._reset_layout)
 
     def _toggle_dock(self, dock_widget, checked: bool):
-        """切换指定 ADS 停靠窗口的可见性。"""
+        """切换指定 ADS 停靠窗口的可见性（保持停靠状态）。"""
         if dock_widget is None:
             return
-        if checked:
-            dock_widget.show()
-        else:
-            dock_widget.closeDockWidget()
+        dock_widget.toggleView(checked)
 
     def _build_settings_menu(self, menu: QMenu):
         """构建「设置」菜单。"""
@@ -651,7 +648,7 @@ class MainWindow(QMainWindow):
         self._dock_action_lib.setWidget(action_lib_panel)
         self._dock_action_lib.setObjectName("dockActionLibrary")
 
-        # ── 画面预览 Dock（初始隐藏） ──────────────────────────
+        # ── 画面预览 Dock（初始隐藏，但已加入停靠管理器） ──────
         self._preview_container = QWidget()
         preview_layout = QVBoxLayout(self._preview_container)
         preview_layout.setContentsMargins(0, 0, 0, 0)
@@ -669,6 +666,7 @@ class MainWindow(QMainWindow):
         # 默认布局：任务管理(左上) | 动作列表(中) | 属性(右)
         #         动作库(左下)
         #         运行日志(底部，跨全宽)
+        #         画面预览(与运行日志同区域，初始隐藏)
         self._dock_manager.addDockWidget(ads.LeftDockWidgetArea, self._dock_left)
         self._dock_manager.addDockWidget(
             ads.RightDockWidgetArea, self._dock_center, self._dock_left.dockAreaWidget()
@@ -685,9 +683,11 @@ class MainWindow(QMainWindow):
         self._dock_manager.addDockWidget(
             ads.BottomDockWidgetArea, self._dock_log, self._dock_center.dockAreaWidget()
         )
-
-        # 预览初始隐藏
-        self._dock_preview.closeDockWidget()
+        # 画面预览也加入管理器（作为日志区域的标签页，初始隐藏）
+        self._dock_manager.addDockWidget(
+            ads.CenterDockWidgetArea, self._dock_preview, self._dock_log.dockAreaWidget()
+        )
+        self._dock_preview.toggleView(False)
 
         # ── 保存默认布局视角 ──────────────────────────────────
         self._dock_manager.addPerspective("Default")
@@ -2627,11 +2627,9 @@ class MainWindow(QMainWindow):
         return widget
 
     def _toggle_log_panel(self):
-        """切换日志面板的显示（通过 ADS Dock 可见性）。"""
-        if self._dock_log and self._dock_log.isVisible():
-            self._dock_log.closeDockWidget()
-        else:
-            self._dock_log.show()
+        """切换日志面板的显示（通过 ADS toggleView 保持停靠状态）。"""
+        if self._dock_log:
+            self._dock_log.toggleView(not self._dock_log.isVisible())
 
     # ═══════════════════════════════════════════════════════════
     # 预览：定时截图刷新
@@ -2700,8 +2698,11 @@ class MainWindow(QMainWindow):
             logger.debug("预览截图失败: %s", e)
 
     def _toggle_preview(self):
-        """切换画面预览面板的显示（通过 ADS Dock 可见性）。"""
-        if self._dock_preview and self._dock_preview.isVisible():
+        """切换画面预览面板的显示（通过 ADS toggleView 保持停靠状态）。"""
+        if not self._dock_preview:
+            return
+        was_visible = self._dock_preview.isVisible()
+        if was_visible:
             # 关闭预览
             self._preview_capturing = False
             self._preview_timer.stop()
@@ -2709,7 +2710,7 @@ class MainWindow(QMainWindow):
                 self._preview_widget.setParent(None)
                 self._preview_widget.deleteLater()
                 self._preview_widget = None
-            self._dock_preview.closeDockWidget()
+            self._dock_preview.toggleView(False)
             self._preview_hwnd = 0
         else:
             # 创建预览控件
@@ -2718,8 +2719,8 @@ class MainWindow(QMainWindow):
                 self._preview_widget.setMinimumHeight(120)
                 self._preview_container.layout().addWidget(self._preview_widget)
 
-            # 显示预览 dock
-            self._dock_preview.show()
+            # 显示预览 dock（保持停靠位置）
+            self._dock_preview.toggleView(True)
 
             # 获取窗口标题并查找句柄
             title = self._window_title
