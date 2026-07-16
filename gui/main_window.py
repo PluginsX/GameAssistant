@@ -29,14 +29,14 @@ import os
 import sys
 import time
 
-from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtCore import Qt, QPoint, QTimer
 from PyQt5.QtGui import (
     QCursor, QFont, QImage, QTextCursor,
 )
 from PyQt5.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDoubleSpinBox,
     QFormLayout, QFrame, QHBoxLayout, QLabel, QLineEdit,
-    QListWidget, QListWidgetItem, QMainWindow, QMessageBox,
+    QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox,
     QPushButton, QScrollArea, QSpinBox, QSplitter, QStackedWidget,
     QTextEdit, QVBoxLayout, QWidget, QInputDialog, QToolButton,
     QTabWidget, QSizePolicy, QDialog,
@@ -60,6 +60,7 @@ from gui.utils.theme import (
     HTCAPTION, HTCLIENT, HTTOP, HTTOPLEFT, HTTOPRIGHT,
     HTLEFT, HTRIGHT, HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT,
     WS_THICKFRAME, WS_MINIMIZEBOX, WS_MAXIMIZEBOX,
+    ADS_STYLE_SHEET,
 )
 from gui.utils.hotkey import HotkeyManager, has_keyboard
 from gui.widgets.preview import PreviewWidget
@@ -75,7 +76,11 @@ from gui.resources.icons import (
     build_maximize_icon,
     build_restore_icon,
     build_close_icon,
+    get_app_icon_path,
 )
+
+# PyQtAds 必须在 PyQt5 之后导入
+from PyQtAds import ads
 
 logger = logging.getLogger(__name__)
 
@@ -125,6 +130,7 @@ class MainWindow(QMainWindow):
         self._hotkey_signal_connected = False
 
         # ── 旧代码兼容控件（占位，不显示在 UI 中） ──────────────
+        self._window_title = self.config.window_title or "QQ三国"
         self.debug_check = QCheckBox()
         self.debug_check.setChecked(self.config.debug)
         self.dpi_scale_check = QCheckBox()
@@ -135,6 +141,25 @@ class MainWindow(QMainWindow):
         self._preview_fps_spin.setRange(1, 60)
         self._preview_fps_spin.setValue(30)
         self._capture_method_combo = QComboBox()
+
+        # 工具栏兼容控件（已迁移到对话框，此处保留供旧代码引用）
+        self.cmb_input_mode = QComboBox()
+        self.cmb_input_mode.addItems(["foreground", "postmsg", "focus"])
+        idx = self.cmb_input_mode.findText(self.config.input_mode)
+        if idx >= 0:
+            self.cmb_input_mode.setCurrentIndex(idx)
+
+        self.hotkey_checkbox = QCheckBox()
+        self.hotkey_checkbox.setChecked(self.config.hotkey_enabled)
+        self.hotkey_checkbox.toggled.connect(self._on_hotkey_toggled)
+
+        self.hotkey_combo = QComboBox()
+        populate_hotkey_combo(self.hotkey_combo)
+        hk = self.config.hotkey_toggle.capitalize()
+        idx = self.hotkey_combo.findText(hk, Qt.MatchFixedString)
+        if idx >= 0:
+            self.hotkey_combo.setCurrentIndex(idx)
+        self.hotkey_combo.currentTextChanged.connect(self._on_hotkey_changed)
 
         # ── 根布局：5 大区纵向排列 ─────────────────────────────
         central = QWidget()
@@ -152,9 +177,9 @@ class MainWindow(QMainWindow):
         control_frame = self._build_control_bar()
         root_layout.addWidget(control_frame)
 
-        # 区 3：中央三栏（水平分割）
-        central_splitter = self._build_central_splitter()
-        root_layout.addWidget(central_splitter, 1)
+        # 区 3：ADS 停靠系统（替代原来的 QSplitter 三栏）
+        dock_container = self._build_dock_system()
+        root_layout.addWidget(dock_container, 1)
 
         # 区 4：状态栏（带日志）
         status_bar = self._build_status_bar()
@@ -163,7 +188,6 @@ class MainWindow(QMainWindow):
         # ── 初始化 ────────────────────────────────────────────
         self._populate_form()
         self._load_task_queue_config()
-        self.__init_log_panel(root_layout)
 
     # ═══════════════════════════════════════════════════════════
     # 构建：标题栏（区 1）
@@ -178,8 +202,23 @@ class MainWindow(QMainWindow):
             "border-bottom: 1px solid #2a2a2a; }"
         )
         layout = QHBoxLayout(title_bar)
-        layout.setContentsMargins(12, 0, 4, 0)
+        layout.setContentsMargins(8, 0, 4, 0)
         layout.setSpacing(0)
+
+        # 应用图标
+        icon_label = QLabel()
+        icon_label.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        icon_path = get_app_icon_path()
+        from PyQt5.QtGui import QPixmap
+        icon_pixmap = QPixmap(icon_path)
+        if not icon_pixmap.isNull():
+            icon_pixmap = icon_pixmap.scaled(
+                20, 20, Qt.KeepAspectRatio, Qt.SmoothTransformation
+            )
+            icon_label.setPixmap(icon_pixmap)
+        icon_label.setFixedWidth(20)
+        layout.addWidget(icon_label)
+        layout.addSpacing(8)
 
         # 标题
         title_label = QLabel("辅助机器人")
@@ -199,18 +238,13 @@ class MainWindow(QMainWindow):
             "QPushButton:hover { color: #ffffff; background: #2a2a2a; border-radius: 4px; }"
         )
 
-        menus = [
-            ("文件", ["保存配置", "导入任务", "导出任务", "─", "退出"]),
-            ("视图", ["画面预览", "调试日志", "─", "重置布局"]),
-            ("设置", ["窗口设置", "快捷键", "自适应缩放", "─", "重启程序"]),
-            ("帮助", ["关于", "使用说明"]),
-        ]
-        for label, items in menus:
-            btn = QPushButton(label)
+        menu_labels = ["文件", "视图", "设置", "帮助"]
+        for mlabel in menu_labels:
+            btn = QPushButton(mlabel)
             btn.setStyleSheet(menu_btn_style)
             btn.setCursor(Qt.PointingHandCursor)
             btn.setFocusPolicy(Qt.NoFocus)
-            btn.clicked.connect(lambda checked, m=label, it=items: self._on_menu_click(m, it))
+            btn.clicked.connect(lambda checked, l=mlabel: self._on_menu_click(l))
             layout.addWidget(btn)
 
         layout.addStretch()
@@ -271,41 +305,147 @@ class MainWindow(QMainWindow):
 
         return title_bar, max_btn
 
-    def _on_menu_click(self, label: str, items: list[str]):
+    def _on_menu_click(self, label: str):
+        """弹出 QMenu 下拉菜单。"""
+        button = self.sender()
+        if not isinstance(button, QPushButton):
+            return
+
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu {
+                background: #1e1e1e;
+                border: 1px solid #3a3a3a;
+                padding: 4px;
+                min-width: 160px;
+            }
+            QMenu::item {
+                padding: 6px 28px 6px 12px;
+                color: #a0a0a0;
+            }
+            QMenu::item:selected {
+                background: #2a2a2a;
+                color: #ffffff;
+            }
+            QMenu::item:disabled {
+                color: #555555;
+            }
+            QMenu::separator {
+                height: 1px;
+                background: #3a3a3a;
+                margin: 4px 8px;
+            }
+            QMenu::indicator {
+                width: 16px;
+                height: 16px;
+            }
+        """)
+
         if label == "文件":
-            action = items[0] if items else ""
-            if action == "保存配置":
-                self.on_save()
-            elif action == "导入任务":
-                self._on_import_tasks()
-            elif action == "导出任务":
-                self._on_export_tasks()
-            elif action == "退出":
-                self.close()
+            self._build_file_menu(menu)
         elif label == "视图":
-            action = items[0] if items else ""
-            if action == "画面预览":
-                self._toggle_preview()
-            elif action == "调试日志":
-                self._toggle_debug_log()
-            elif action == "重置布局":
-                self._reset_layout()
+            self._build_view_menu(menu)
         elif label == "设置":
-            action = items[0] if items else ""
-            if action == "窗口设置":
-                self._open_settings_dialog()
-            elif action == "快捷键":
-                self._open_hotkey_dialog()
-            elif action == "自适应缩放":
-                self._on_dpi_scale_toggled(not self.config.auto_dpi_scale)
-            elif action == "重启程序":
-                self._restart_app()
+            self._build_settings_menu(menu)
         elif label == "帮助":
-            action = items[0] if items else ""
-            if action == "关于":
-                QMessageBox.about(self, "关于辅助机器人",
-                    "GameAssistant v2.0.0\n\nQQ三国游戏辅助程序\n"
-                    "支持按键循环 + 任务队列模式")
+            self._build_help_menu(menu)
+
+        menu.exec_(button.mapToGlobal(QPoint(0, button.height())))
+
+    def _build_file_menu(self, menu: QMenu):
+        """构建「文件」菜单。"""
+        # ── 导入子菜单 ──
+        sub_import = menu.addMenu("导入")
+        sub_import.setStyleSheet(menu.styleSheet())
+        act = sub_import.addAction("全局配置")
+        act.triggered.connect(self._on_import_config)
+        act = sub_import.addAction("任务配置")
+        act.triggered.connect(self._on_import_tasks)
+
+        # ── 导出子菜单 ──
+        sub_export = menu.addMenu("导出")
+        sub_export.setStyleSheet(menu.styleSheet())
+        act = sub_export.addAction("全局配置")
+        act.triggered.connect(self._on_export_config)
+        act = sub_export.addAction("任务配置")
+        act.triggered.connect(self._on_export_tasks)
+
+        menu.addSeparator()
+
+        act = menu.addAction("退出")
+        act.triggered.connect(self.close)
+
+    def _build_view_menu(self, menu: QMenu):
+        """构建「视图」菜单，列出所有 ADS 独立窗口并支持切换。"""
+        dock_widgets = [
+            self._dock_left,
+            self._dock_action_lib,
+            self._dock_center,
+            self._dock_right,
+            self._dock_preview,
+            self._dock_log,
+        ]
+
+        for dw in dock_widgets:
+            if dw is None:
+                continue
+            title = dw.windowTitle()
+            action = menu.addAction(title)
+            action.setCheckable(True)
+            action.setChecked(dw.isVisible())
+            action.triggered.connect(lambda checked, d=dw: self._toggle_dock(d, checked))
+
+        menu.addSeparator()
+
+        act = menu.addAction("重置布局")
+        act.triggered.connect(self._reset_layout)
+
+    def _toggle_dock(self, dock_widget, checked: bool):
+        """切换指定 ADS 停靠窗口的可见性。"""
+        if dock_widget is None:
+            return
+        if checked:
+            dock_widget.show()
+        else:
+            dock_widget.closeDockWidget()
+
+    def _build_settings_menu(self, menu: QMenu):
+        """构建「设置」菜单。"""
+        act = menu.addAction("窗口设置")
+        act.triggered.connect(self._open_settings_dialog)
+
+        act = menu.addAction("快捷键")
+        act.triggered.connect(self._open_hotkey_dialog)
+
+        act = menu.addAction("自适应缩放")
+        act.setCheckable(True)
+        act.setChecked(self.config.auto_dpi_scale)
+        act.triggered.connect(lambda checked: self._on_dpi_scale_toggled(checked))
+
+        menu.addSeparator()
+
+        act = menu.addAction("重启程序")
+        act.triggered.connect(self._restart_app)
+
+    def _build_help_menu(self, menu: QMenu):
+        """构建「帮助」菜单。"""
+        act = menu.addAction("关于")
+        act.triggered.connect(lambda: QMessageBox.about(
+            self, "关于辅助机器人",
+            "GameAssistant v2.0.0\n\nQQ三国游戏辅助程序\n"
+            "支持按键循环 + 任务队列模式"
+        ))
+
+        act = menu.addAction("使用说明")
+        act.triggered.connect(lambda: QMessageBox.information(
+            self, "使用说明",
+            "1. 设置目标窗口标题\n"
+            "2. 选择输入模式\n"
+            "3. 配置按键组合\n"
+            "4. 点击运行开始脚本\n\n"
+            "可拖拽/停靠各面板到任意位置，\n"
+            "布局自动保存，重启后恢复。"
+        ))
 
     def _title_toggle_maximize(self):
         if self.isMaximized():
@@ -441,60 +581,18 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.apply_btn)
         layout.addWidget(self.save_btn)
 
-        # 分隔线
-        sep = QFrame()
-        sep.setFrameShape(QFrame.VLine)
-        sep.setStyleSheet("color: #3a3a3a;")
-        layout.addWidget(sep)
-
-        # 窗口选择按钮
-        self._window_title = "QQ三国"
-        self.title_btn = QPushButton(" QQ三国")
-        self.title_btn.setFixedWidth(140)
-        self.title_btn.setCursor(Qt.PointingHandCursor)
-        self.title_btn.setStyleSheet(
-            "QPushButton { background: #2a2a2a; color: #e0e0e0; border: 1px solid #3a3a3a; "
-            "border-radius: 4px; padding: 3px 8px; font-size: 11px; text-align: left; } "
-            "QPushButton:hover { background: #3a3a3a; border-color: #6b8cff; }"
-        )
-        self.title_btn.clicked.connect(self._show_window_picker)
-        self._window_picker_dialog = None
-        layout.addWidget(QLabel("窗口:"))
-        layout.addWidget(self.title_btn)
-
-        # 输入模式
-        self.cmb_input_mode = QComboBox()
-        self.cmb_input_mode.addItems(["foreground", "postmsg", "focus"])
-        self.cmb_input_mode.setFixedWidth(85)
-        self.cmb_input_mode.setStyleSheet(
-            "QComboBox { background: #2a2a2a; color: #e0e0e0; border: 1px solid #3a3a3a; "
-            "border-radius: 4px; padding: 2px 4px; font-size: 11px; }"
-        )
-        layout.addWidget(QLabel("模式:"))
-        layout.addWidget(self.cmb_input_mode)
-
-        # 热键
-        self.hotkey_checkbox = QCheckBox("快捷键")
-        self.hotkey_checkbox.setChecked(True)
-        self.hotkey_checkbox.setStyleSheet("color: #c0c0c0; font-size: 12px;")
-        self.hotkey_checkbox.toggled.connect(self._on_hotkey_toggled)
-        layout.addWidget(self.hotkey_checkbox)
-
-        self.hotkey_combo = QComboBox()
-        populate_hotkey_combo(self.hotkey_combo)
-        self.hotkey_combo.setFixedWidth(90)
-        self.hotkey_combo.setToolTip("切换启动/停止")
-        self.hotkey_combo.currentTextChanged.connect(self._on_hotkey_changed)
-        layout.addWidget(self.hotkey_combo)
-
         layout.addStretch()
 
         # 状态指示
         self.status_dot = QLabel("●")
         self.status_dot.setFixedWidth(16)
-        self.status_dot.setStyleSheet("color: #444; font-size: 16px;")
+        self.status_dot.setStyleSheet(
+            "QLabel { color: #444; font-size: 16px; background: transparent; }"
+        )
         self.status_label = QLabel("未运行")
-        self.status_label.setStyleSheet("color: #808080; font-size: 12px;")
+        self.status_label.setStyleSheet(
+            "QLabel { color: #808080; font-size: 12px; background: transparent; }"
+        )
         layout.addWidget(self.status_dot)
         layout.addWidget(self.status_label)
 
@@ -504,25 +602,307 @@ class MainWindow(QMainWindow):
     # 构建：中央三栏（区 3）
     # ═══════════════════════════════════════════════════════════
 
-    def _build_central_splitter(self):
-        splitter = QSplitter(Qt.Horizontal)
-        splitter.setHandleWidth(3)
-        splitter.setStyleSheet(
-            "QSplitter::handle { background: #2a2a2a; } "
-            "QSplitter::handle:hover { background: #6b8cff; }"
+    def _build_dock_system(self):
+        """构建 ADS 停靠系统，替代原来的 QSplitter 三栏布局。
+
+        创建 CDockManager 并将各功能面板封装为可自由拖拽/停靠/合并的 CDockWidget。
+        支持布局持久化，重启后自动恢复用户自定义的窗口排列。
+        """
+        dock_container = QWidget()
+        dock_container.setObjectName("dockContainer")
+        dock_layout = QVBoxLayout(dock_container)
+        dock_layout.setContentsMargins(0, 0, 0, 0)
+        dock_layout.setSpacing(0)
+
+        self._dock_manager = ads.CDockManager(dock_container)
+        dock_layout.addWidget(self._dock_manager)
+
+        # 压缩标题栏高度的关键配置
+        self._dock_manager.setConfigFlag(ads.CDockManager.DefaultBaseConfig, True)
+        self._dock_manager.setConfigFlag(ads.CDockManager.EqualSplitOnInsertion, True)
+        self._dock_manager.setConfigFlag(ads.CDockManager.ActiveTabHasCloseButton, False)
+        self._dock_manager.setConfigFlag(ads.CDockManager.DockAreaHideDisabledButtons, True)
+        self._dock_manager.setConfigFlag(ads.CDockManager.DockAreaHasTabsMenuButton, False)
+
+        # 应用 ADS 深色主题
+        self._dock_manager.setStyleSheet(ADS_STYLE_SHEET)
+
+        # ── 左面板：任务管理 ──────────────────────────────────
+        left_panel = self._build_left_panel()
+        self._dock_left = ads.CDockWidget("任务管理")
+        self._dock_left.setWidget(left_panel)
+        self._dock_left.setObjectName("dockTaskManager")
+
+        # ── 中面板：动作列表 ──────────────────────────────────
+        center_panel = self._build_center_panel()
+        self._dock_center = ads.CDockWidget("动作列表")
+        self._dock_center.setWidget(center_panel)
+        self._dock_center.setObjectName("dockEventList")
+
+        # ── 右面板：属性 ──────────────────────────────────────
+        right_panel = self._build_right_panel()
+        self._dock_right = ads.CDockWidget("属性")
+        self._dock_right.setWidget(right_panel)
+        self._dock_right.setObjectName("dockProperties")
+
+        # ── 动作库 Dock ──────────────────────────────────────
+        action_lib_panel = self._build_action_library_panel()
+        self._dock_action_lib = ads.CDockWidget("动作库")
+        self._dock_action_lib.setWidget(action_lib_panel)
+        self._dock_action_lib.setObjectName("dockActionLibrary")
+
+        # ── 画面预览 Dock（初始隐藏） ──────────────────────────
+        self._preview_container = QWidget()
+        preview_layout = QVBoxLayout(self._preview_container)
+        preview_layout.setContentsMargins(0, 0, 0, 0)
+        self._dock_preview = ads.CDockWidget("画面预览")
+        self._dock_preview.setWidget(self._preview_container)
+        self._dock_preview.setObjectName("dockPreview")
+
+        # ── 运行日志 Dock（初始隐藏） ──────────────────────────
+        self._log_panel = self._build_log_panel()
+        self._dock_log = ads.CDockWidget("运行日志")
+        self._dock_log.setWidget(self._log_panel)
+        self._dock_log.setObjectName("dockLog")
+
+        # ── 添加到停靠管理器 ──────────────────────────────────
+        # 默认布局：任务管理(左上) | 动作列表(中) | 属性(右)
+        #         动作库(左下)
+        self._dock_manager.addDockWidget(ads.LeftDockWidgetArea, self._dock_left)
+        self._dock_manager.addDockWidget(
+            ads.RightDockWidgetArea, self._dock_center, self._dock_left.dockAreaWidget()
+        )
+        self._dock_manager.addDockWidget(
+            ads.RightDockWidgetArea, self._dock_right, self._dock_center.dockAreaWidget()
+        )
+        # 动作库停靠在左面板下方（必须在左/中/右都添加后再插入，
+        # 否则会因为 dock area 重新排列导致动作库变成全宽）
+        self._dock_manager.addDockWidget(
+            ads.BottomDockWidgetArea, self._dock_action_lib, self._dock_left.dockAreaWidget()
         )
 
-        left_panel = self._build_left_panel()
-        center_panel = self._build_center_panel()
-        right_panel = self._build_right_panel()
+        # 预览和日志初始隐藏
+        self._dock_preview.closeDockWidget()
+        self._dock_log.closeDockWidget()
 
-        splitter.addWidget(left_panel)
-        splitter.addWidget(center_panel)
-        splitter.addWidget(right_panel)
+        # ── 保存默认布局视角 ──────────────────────────────────
+        self._dock_manager.addPerspective("Default")
 
-        total = 400
-        splitter.setSizes([int(total * 0.25), int(total * 0.5), int(total * 0.25)])
-        return splitter
+        # ── 恢复上次布局（验证有效后才恢复） ────────────────────
+        self._restore_layout()
+
+        # ── 优化标题栏样式 ───────────────────────────────────
+        self._optimize_dock_title_bars()
+
+        return dock_container
+
+    def _optimize_dock_title_bars(self):
+        """优化所有 dock 区域的标题栏：减少内边距、修复文字截断、消除黑色空白。
+
+        1. 减少 tab 内部左边距（默认 10px 太大，导致文字被裁）
+        2. 给 eliding label 增加最小宽度余量，防止 elide 误裁文字边缘
+        3. tab bar 自适应扩展，占满标题栏可用宽度
+        4. tab bar 内部的 tab 扩展填满宽度，消除右侧黑色空白区域
+        5. 标题栏按钮图标改为浅灰色，提高可见度
+        6. 监听新增 dock area，自动应用优化
+        """
+        from PyQt5.QtWidgets import QSizePolicy
+
+        # 浅灰色图标，用于 Dark 主题下的标题栏按钮
+        _light_gray = "#c8c8c8"
+
+        def _find_by_classname(obj, name_fragment):
+            for c in obj.children():
+                cname = c.metaObject().className() if hasattr(c, 'metaObject') else type(c).__name__
+                if name_fragment in cname:
+                    return c
+                result = _find_by_classname(c, name_fragment)
+                if result:
+                    return result
+            return None
+
+        def _find_all_by_classname(obj, name_fragment):
+            results = []
+            for c in obj.children():
+                cname = c.metaObject().className() if hasattr(c, 'metaObject') else type(c).__name__
+                if name_fragment in cname:
+                    results.append(c)
+                results.extend(_find_all_by_classname(c, name_fragment))
+            return results
+
+        def _find_inner_content_widget(tab_bar):
+            """找到 tab bar viewport 内部的 QWidget（包含 tab 和 spacer）。"""
+            vp = tab_bar.viewport()
+            for c in vp.children():
+                if hasattr(c, 'metaObject') and c.metaObject and c.metaObject().className() == 'QWidget':
+                    return c
+            return None
+
+        def _recolor_icon(icon, target_color):
+            """将 QIcon 重新着色为指定颜色（使用 SourceIn 组合模式）。"""
+            from PyQt5.QtGui import QPainter, QColor, QPixmap, QImage, QIcon
+            if icon.isNull():
+                return icon
+            sizes = icon.availableSizes()
+            if not sizes:
+                sizes = [ICON_SIZE]
+            new_icon = QIcon()
+            for size in sizes:
+                pix = icon.pixmap(size)
+                if pix.isNull():
+                    continue
+                # 使用 SourceIn 模式高效着色：用目标颜色替换 alpha 通道的颜色
+                image = pix.toImage().convertToFormat(QImage.Format_ARGB32)
+                new_pix = QPixmap(image.size())
+                new_pix.fill(Qt.transparent)
+                painter = QPainter(new_pix)
+                painter.setRenderHint(QPainter.Antialiasing)
+                painter.setRenderHint(QPainter.SmoothPixmapTransform)
+                # 先绘制原始图像的 alpha 通道
+                painter.drawPixmap(0, 0, pix)
+                # 用 SourceIn 模式叠加目标颜色
+                painter.setCompositionMode(QPainter.CompositionMode_SourceIn)
+                painter.fillRect(new_pix.rect(), QColor(target_color))
+                painter.end()
+                new_icon.addPixmap(new_pix)
+            return new_icon
+
+        def _update_title_bar_buttons(tb):
+            """更新标题栏按钮的图标颜色为浅灰色。"""
+            buttons = _find_all_by_classname(tb, 'TitleBarButton')
+            for btn in buttons:
+                if hasattr(btn, 'icon') and hasattr(btn, 'setIcon'):
+                    current_icon = btn.icon()
+                    if not current_icon.isNull():
+                        btn.setIcon(_recolor_icon(current_icon, _light_gray))
+                    btn.setIconSize(ICON_SIZE)
+
+        def _optimize_area(area):
+            tb = _find_by_classname(area, 'TitleBar')
+            if not tb:
+                return
+            # 标签栏扩展占满
+            tab_bar = _find_by_classname(tb, 'DockAreaTabBar')
+            if tab_bar:
+                tab_bar.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+                # 让 tab 扩展填满 tab bar，消除右侧黑色空白
+                inner = _find_inner_content_widget(tab_bar)
+                if inner and inner.layout():
+                    lyt = inner.layout()
+                    # item 0 = tab, item 1 = spacer
+                    # 把 tab 的 stretch 设为 1，spacer 设为 0，tab 就会扩展填满
+                    if lyt.count() >= 2:
+                        lyt.setStretch(0, 1)
+                        lyt.setStretch(1, 0)
+            # 标签页 + 文字标签优化
+            tab = _find_by_classname(tb, 'DockWidgetTab')
+            if tab and tab.layout():
+                # 减少左边距（默认 10px），左右各留 4px
+                tab.layout().setContentsMargins(4, 0, 4, 0)
+            label = _find_by_classname(tb, 'ElidingLabel')
+            if label:
+                # 增加 6px 余量，防止 CElidingLabel 误裁文字边缘
+                label.setMinimumWidth(label.sizeHint().width() + 6)
+                label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+            # 更新标题栏按钮图标颜色
+            _update_title_bar_buttons(tb)
+
+        self._optimized_areas = set()
+        for i in range(self._dock_manager.dockAreaCount()):
+            area = self._dock_manager.dockArea(i)
+            _optimize_area(area)
+            self._optimized_areas.add(id(area))
+
+        def _on_areas_added():
+            for i in range(self._dock_manager.dockAreaCount()):
+                area = self._dock_manager.dockArea(i)
+                if id(area) not in self._optimized_areas:
+                    _optimize_area(area)
+                    self._optimized_areas.add(id(area))
+
+        self._dock_manager.dockAreasAdded.connect(_on_areas_added)
+
+        # 监听浮动窗口创建，优化其标题栏按钮
+        def _on_floating_widget_created(widget):
+            """浮动窗口创建时优化其标题栏按钮颜色。"""
+            # 延迟处理，确保浮动窗口完全构建
+            QTimer.singleShot(0, lambda: _optimize_floating_widget(widget))
+
+        def _optimize_floating_widget(fw):
+            """优化浮动窗口的标题栏。"""
+            if fw is None:
+                return
+            tb = _find_by_classname(fw, 'TitleBar')
+            if tb:
+                _update_title_bar_buttons(tb)
+
+        # 尝试连接浮动窗口创建信号（不同版本 ADS 信号名可能不同）
+        if hasattr(self._dock_manager, 'floatingWidgetCreated'):
+            self._dock_manager.floatingWidgetCreated.connect(_on_floating_widget_created)
+        elif hasattr(self._dock_manager, 'floatingDockContainerCreated'):
+            self._dock_manager.floatingDockContainerCreated.connect(_on_floating_widget_created)
+
+    # ═══════════════════════════════════════════════════════════
+    # 布局持久化
+    # ═══════════════════════════════════════════════════════════
+
+    def _save_layout(self):
+        """保存当前停靠布局到 QSettings。"""
+        from PyQt5.QtCore import QSettings
+        settings = QSettings("GameAssistant", "MainWindow")
+        state = self._dock_manager.saveState()
+        settings.setValue("adsLayout", state)
+        settings.setValue("adsLayoutVersion", 1)
+
+    def _restore_layout(self):
+        """从 QSettings 恢复上次保存的停靠布局。
+
+        恢复后验证核心面板（任务管理、动作列表、属性）是否至少有一个可见，
+        否则回退到默认布局，防止损坏的状态导致空白界面。
+        """
+        from PyQt5.QtCore import QSettings
+        settings = QSettings("GameAssistant", "MainWindow")
+        version = settings.value("adsLayoutVersion", 0, type=int)
+        if version == 1:
+            state = settings.value("adsLayout")
+            if state is not None:
+                try:
+                    ok = self._dock_manager.restoreState(state)
+                    if ok:
+                        # 验证核心面板是否至少有一个可见
+                        core_visible = any([
+                            self._dock_left and self._dock_left.isVisible(),
+                            self._dock_action_lib and self._dock_action_lib.isVisible(),
+                            self._dock_center and self._dock_center.isVisible(),
+                            self._dock_right and self._dock_right.isVisible(),
+                        ])
+                        if core_visible:
+                            return
+                except Exception:
+                    pass
+        # 回退到默认布局
+        self._reset_layout()
+
+    def _reset_layout(self):
+        """重置窗口布局为默认排列：左 | 中 | 右。
+
+        使用 ADS Perspective 功能快速切换到预设的默认布局。
+        """
+        if "Default" in self._dock_manager.perspectiveNames():
+            self._dock_manager.openPerspective("Default")
+
+    def closeEvent(self, event):
+        """窗口关闭前保存布局。"""
+        # 只在至少有核心面板可见时才保存，防止保存空布局
+        core_visible = any([
+            self._dock_left and self._dock_left.isVisible(),
+            self._dock_action_lib and self._dock_action_lib.isVisible(),
+            self._dock_center and self._dock_center.isVisible(),
+            self._dock_right and self._dock_right.isVisible(),
+        ])
+        if core_visible:
+            self._save_layout()
+        super().closeEvent(event)
 
     # ── 左栏 ──────────────────────────────────────────────────
 
@@ -544,34 +924,51 @@ class MainWindow(QMainWindow):
         seq_header = QHBoxLayout()
         seq_header.setSpacing(4)
         btn_add_seq = QPushButton("+")
-        btn_add_seq.setFixedWidth(22)
+        btn_add_seq.setFixedSize(22, 22)
         btn_add_seq.setStyleSheet(
             "QPushButton { background: #1a3a1a; color: #4ade80; border: 1px solid #2a5a2a; "
-            "border-radius: 4px; font-size: 14px; font-weight: 700; } "
+            "border-radius: 4px; font-size: 14px; font-weight: 700; padding: 0; } "
             "QPushButton:hover { background: #2a5a2a; }"
         )
         btn_add_seq.clicked.connect(lambda: self._on_add_task("sequential"))
         seq_header.addWidget(btn_add_seq)
         btn_del_seq = QPushButton("×")
-        btn_del_seq.setFixedWidth(22)
+        btn_del_seq.setFixedSize(22, 22)
         btn_del_seq.setStyleSheet(
             "QPushButton { background: #3a1a1a; color: #ef4444; border: 1px solid #5a2a2a; "
-            "border-radius: 4px; font-size: 14px; font-weight: 700; } "
+            "border-radius: 4px; font-size: 14px; font-weight: 700; padding: 0; } "
             "QPushButton:hover { background: #5a2a2a; }"
         )
         btn_del_seq.clicked.connect(self._on_del_task)
         seq_header.addWidget(btn_del_seq)
         btn_rename_seq = QPushButton("✎")
-        btn_rename_seq.setFixedWidth(22)
+        btn_rename_seq.setFixedSize(22, 22)
         btn_rename_seq.setToolTip("重命名")
         btn_rename_seq.setStyleSheet(
             "QPushButton { background: #2a2a2a; color: #d0d0d0; border: 1px solid #3a3a3a; "
-            "border-radius: 4px; font-size: 13px; font-weight: 700; } "
+            "border-radius: 4px; font-size: 13px; font-weight: 700; padding: 0; } "
             "QPushButton:hover { background: #3a3a3a; }"
         )
         btn_rename_seq.clicked.connect(self._on_rename_task)
         seq_header.addWidget(btn_rename_seq)
         seq_header.addStretch()
+        self.seq_loop_check = QCheckBox("无限循环")
+        self.seq_loop_check.setStyleSheet("color: #c0c0c0; font-size: 11px;")
+        self.seq_loop_check.setChecked(True)
+        self.seq_loop_check.toggled.connect(self._on_seq_loop_toggled)
+        seq_header.addWidget(self.seq_loop_check)
+        self.seq_loop_spin = QSpinBox()
+        self.seq_loop_spin.setRange(1, 9999)
+        self.seq_loop_spin.setValue(1)
+        self.seq_loop_spin.setSuffix(" 次")
+        self.seq_loop_spin.setStyleSheet(
+            "QSpinBox { background: #1a1a1a; color: #e0e0e0; border: 1px solid #3a3a3a; "
+            "border-radius: 3px; padding: 1px 4px; font-size: 11px; } "
+            "QSpinBox::up-button, QSpinBox::down-button { width: 14px; }"
+        )
+        self.seq_loop_spin.valueChanged.connect(self._on_seq_loop_count_changed)
+        self.seq_loop_spin.setVisible(False)
+        seq_header.addWidget(self.seq_loop_spin)
         seq_layout.addLayout(seq_header)
 
         self.seq_task_list = QListWidget()
@@ -595,29 +992,29 @@ class MainWindow(QMainWindow):
         ind_header = QHBoxLayout()
         ind_header.setSpacing(4)
         btn_add_ind = QPushButton("+")
-        btn_add_ind.setFixedWidth(22)
+        btn_add_ind.setFixedSize(22, 22)
         btn_add_ind.setStyleSheet(
             "QPushButton { background: #1a3a1a; color: #4ade80; border: 1px solid #2a5a2a; "
-            "border-radius: 4px; font-size: 14px; font-weight: 700; } "
+            "border-radius: 4px; font-size: 14px; font-weight: 700; padding: 0; } "
             "QPushButton:hover { background: #2a5a2a; }"
         )
         btn_add_ind.clicked.connect(lambda: self._on_add_task("independent"))
         ind_header.addWidget(btn_add_ind)
         btn_del_ind = QPushButton("×")
-        btn_del_ind.setFixedWidth(22)
+        btn_del_ind.setFixedSize(22, 22)
         btn_del_ind.setStyleSheet(
             "QPushButton { background: #3a1a1a; color: #ef4444; border: 1px solid #5a2a2a; "
-            "border-radius: 4px; font-size: 14px; font-weight: 700; } "
+            "border-radius: 4px; font-size: 14px; font-weight: 700; padding: 0; } "
             "QPushButton:hover { background: #5a2a2a; }"
         )
         btn_del_ind.clicked.connect(self._on_del_task)
         ind_header.addWidget(btn_del_ind)
         btn_rename_ind = QPushButton("✎")
-        btn_rename_ind.setFixedWidth(22)
+        btn_rename_ind.setFixedSize(22, 22)
         btn_rename_ind.setToolTip("重命名")
         btn_rename_ind.setStyleSheet(
             "QPushButton { background: #2a2a2a; color: #d0d0d0; border: 1px solid #3a3a3a; "
-            "border-radius: 4px; font-size: 13px; font-weight: 700; } "
+            "border-radius: 4px; font-size: 13px; font-weight: 700; padding: 0; } "
             "QPushButton:hover { background: #3a3a3a; }"
         )
         btn_rename_ind.clicked.connect(self._on_rename_task)
@@ -640,12 +1037,15 @@ class MainWindow(QMainWindow):
 
         self._task_tab.currentChanged.connect(self._on_task_tab_changed)
 
-        layout.addWidget(self._task_tab)
+        layout.addWidget(self._task_tab, 1)
+        return widget
 
-        # ── 下半：动作库（可折叠分类） ─────────────────────────
-        bricks_label = QLabel("■ 动作库")
-        bricks_label.setStyleSheet(_SECTION_TITLE_STYLE)
-        layout.addWidget(bricks_label)
+    def _build_action_library_panel(self):
+        """构建动作库面板（可折叠分类）。"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(6, 8, 6, 8)
+        layout.setSpacing(6)
 
         # 按键触发
         self._sec_key = CollapsibleSection("按键触发", expanded=False)
@@ -737,7 +1137,7 @@ class MainWindow(QMainWindow):
         self.stop_btn.setEnabled(True)
         self.apply_btn.setEnabled(True)
         self.status_label.setText("运行中")
-        self.status_dot.setStyleSheet("color: #4ade80; font-size: 16px;")
+        self.status_dot.setStyleSheet("QLabel { color: #4ade80; font-size: 16px; background: transparent; }")
 
     def on_stop(self):
         """停止挂机脚本。"""
@@ -750,7 +1150,7 @@ class MainWindow(QMainWindow):
         self.stop_btn.setEnabled(False)
         self.apply_btn.setEnabled(False)
         self.status_label.setText("已停止")
-        self.status_dot.setStyleSheet("color: #ef4444; font-size: 16px;")
+        self.status_dot.setStyleSheet("QLabel { color: #ef4444; font-size: 16px; background: transparent; }")
 
     def on_apply(self):
         """热更新配置到运行中的 worker。"""
@@ -772,12 +1172,8 @@ class MainWindow(QMainWindow):
         self._status_log.setText("配置已保存")
 
     def _save_task_queue_config(self):
-        """将间隔/屏蔽等 UI 值同步到 TaskQueue 并持久化。"""
+        """将屏蔽动作等 UI 值同步到 TaskQueue 并持久化。"""
         if self._task_queue is not None:
-            self._task_queue.min_action_interval = self.min_interval_spin.value()
-            self._task_queue.min_action_interval_random = self.min_interval_random_check.isChecked()
-            self._task_queue.min_action_interval_min = self.min_interval_min_spin.value()
-            self._task_queue.min_action_interval_max = self.min_interval_max_spin.value()
             self._task_queue.block_actions_enabled = self.cb_block_actions.isChecked()
             blocked = []
             for w in self._block_action_widgets:
@@ -817,9 +1213,9 @@ class MainWindow(QMainWindow):
         """处理 worker 发来的状态变化。"""
         self.status_label.setText(status)
         if "运行" in status:
-            self.status_dot.setStyleSheet("color: #4ade80; font-size: 16px;")
+            self.status_dot.setStyleSheet("QLabel { color: #4ade80; font-size: 16px; background: transparent; }")
         else:
-            self.status_dot.setStyleSheet("color: #ef4444; font-size: 16px;")
+            self.status_dot.setStyleSheet("QLabel { color: #ef4444; font-size: 16px; background: transparent; }")
         if status == "已停止":
             self.start_btn.setEnabled(True)
             self.stop_btn.setEnabled(False)
@@ -892,9 +1288,7 @@ class MainWindow(QMainWindow):
         tasks = self._tasks_of_type(task_type)
         if row < len(tasks):
             task = tasks[row]
-            # 右侧切换到任务属性
             self._show_task_properties()
-            # 更新属性面板
             self._task_type_combo.blockSignals(True)
             idx = self._task_type_combo.findData(task.task_type)
             if idx >= 0:
@@ -903,7 +1297,20 @@ class MainWindow(QMainWindow):
             self.repeat_spin.blockSignals(True)
             self.repeat_spin.setValue(task.repeat)
             self.repeat_spin.blockSignals(False)
-            # 刷新事件列表
+            self.min_interval_spin.blockSignals(True)
+            self.min_interval_spin.setValue(task.min_action_interval)
+            self.min_interval_spin.blockSignals(False)
+            self.min_interval_random_check.blockSignals(True)
+            self.min_interval_random_check.setChecked(task.min_action_interval_random)
+            self.min_interval_random_check.blockSignals(False)
+            self.min_interval_min_spin.blockSignals(True)
+            self.min_interval_min_spin.setValue(task.min_action_interval_min)
+            self.min_interval_min_spin.blockSignals(False)
+            self.min_interval_max_spin.blockSignals(True)
+            self.min_interval_max_spin.setValue(task.min_action_interval_max)
+            self.min_interval_max_spin.blockSignals(False)
+            self._min_interval_min_widget.setVisible(task.min_action_interval_random)
+            self._min_interval_max_widget.setVisible(task.min_action_interval_random)
             self.event_list.refresh_events(task)
 
     def _on_task_tab_changed(self, index: int):
@@ -1021,54 +1428,123 @@ class MainWindow(QMainWindow):
         if 0 <= row < len(tasks):
             tasks[row].repeat = value
 
+    def _on_min_interval_changed(self, value: int):
+        """最小动作间隔变化。"""
+        if self._task_queue is None:
+            return
+        task = self._get_selected_task()
+        if task is not None:
+            task.min_action_interval = value
+
+    def _on_min_interval_random_toggled(self, checked: bool):
+        """最小动作间隔随机开关。"""
+        self._min_interval_min_widget.setVisible(checked)
+        self._min_interval_max_widget.setVisible(checked)
+        if self._task_queue is None:
+            return
+        task = self._get_selected_task()
+        if task is not None:
+            task.min_action_interval_random = checked
+
+    def _on_min_interval_min_changed(self, value: int):
+        """最小动作间隔（随机最小值）变化。"""
+        if self._task_queue is None:
+            return
+        task = self._get_selected_task()
+        if task is not None:
+            task.min_action_interval_min = value
+
+    def _on_min_interval_max_changed(self, value: int):
+        """最小动作间隔（随机最大值）变化。"""
+        if self._task_queue is None:
+            return
+        task = self._get_selected_task()
+        if task is not None:
+            task.min_action_interval_max = value
+
     # ═══════════════════════════════════════════════════════════
     # 对话框
     # ═══════════════════════════════════════════════════════════
 
     def _open_settings_dialog(self):
-        """打开设置对话框：全局配置、截图方案、DPI 适配等。"""
+        """打开设置对话框：目标窗口、输入模式、截图方案、DPI 适配等。"""
         dlg = QDialog(self)
         dlg.setWindowTitle("设置")
-        dlg.resize(440, 360)
+        dlg.resize(440, 480)
         dlg.setStyleSheet("QDialog { background: #1e1e1e; }")
         dlg.setWindowFlags(dlg.windowFlags() & ~Qt.WindowContextHelpButtonHint)
         layout = QVBoxLayout(dlg)
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(12)
 
-        # ── 配置管理 ──────────────────────────────────────
-        cfg_label = QLabel("■ 配置管理")
-        cfg_label.setStyleSheet(_SECTION_TITLE_STYLE)
-        layout.addWidget(cfg_label)
+        # ── 目标窗口 ──────────────────────────────────────
+        win_label = QLabel("■ 目标窗口")
+        win_label.setStyleSheet(_SECTION_TITLE_STYLE)
+        layout.addWidget(win_label)
 
-        cfg_frame = QFrame()
-        cfg_frame.setStyleSheet(
+        win_frame = QFrame()
+        win_frame.setStyleSheet(
             "QFrame { background: #1a1a1a; border: 1px solid #3a3a3a; border-radius: 6px; }"
         )
-        cfg_layout = QHBoxLayout(cfg_frame)
-        cfg_layout.setContentsMargins(8, 8, 8, 8)
-        cfg_layout.setSpacing(8)
+        win_layout = QVBoxLayout(win_frame)
+        win_layout.setContentsMargins(8, 8, 8, 8)
+        win_layout.setSpacing(6)
 
-        btn_import = QPushButton("📥 导入配置")
-        btn_import.setStyleSheet(
+        self._settings_window_title = QLineEdit(self._window_title)
+        self._settings_window_title.setStyleSheet(
+            "QLineEdit { background: #2a2a2a; color: #e0e0e0; border: 1px solid #3a3a3a; "
+            "border-radius: 4px; padding: 5px 8px; font-size: 12px; }"
+        )
+        self._settings_window_title.setPlaceholderText("输入窗口标题关键词...")
+        win_layout.addWidget(self._settings_window_title)
+
+        btn_pick_window = QPushButton("🔍 选择窗口")
+        btn_pick_window.setStyleSheet(
             "QPushButton { background: #2a2a2a; color: #e0e0e0; border: 1px solid #3a3a3a; "
-            "border-radius: 4px; padding: 6px 12px; font-size: 12px; } "
+            "border-radius: 4px; padding: 5px 12px; font-size: 12px; } "
             "QPushButton:hover { background: #3a3a3a; border-color: #6b8cff; }"
         )
-        btn_import.clicked.connect(self._on_import_config)
-        cfg_layout.addWidget(btn_import)
-
-        btn_export = QPushButton("📤 导出配置")
-        btn_export.setStyleSheet(
-            "QPushButton { background: #2a2a2a; color: #e0e0e0; border: 1px solid #3a3a3a; "
-            "border-radius: 4px; padding: 6px 12px; font-size: 12px; } "
-            "QPushButton:hover { background: #3a3a3a; border-color: #6b8cff; }"
+        btn_pick_window.clicked.connect(
+            lambda: self._pick_window_for_settings(self._settings_window_title)
         )
-        btn_export.clicked.connect(self._on_export_config)
-        cfg_layout.addWidget(btn_export)
+        win_layout.addWidget(btn_pick_window)
 
-        cfg_layout.addStretch()
-        layout.addWidget(cfg_frame)
+        layout.addWidget(win_frame)
+
+        # ── 输入模式 ──────────────────────────────────────
+        mode_label = QLabel("■ 输入模式")
+        mode_label.setStyleSheet(_SECTION_TITLE_STYLE)
+        layout.addWidget(mode_label)
+
+        mode_frame = QFrame()
+        mode_frame.setStyleSheet(
+            "QFrame { background: #1a1a1a; border: 1px solid #3a3a3a; border-radius: 6px; }"
+        )
+        mode_layout = QVBoxLayout(mode_frame)
+        mode_layout.setContentsMargins(8, 8, 8, 8)
+        mode_layout.setSpacing(6)
+
+        self._settings_input_mode = QComboBox()
+        self._settings_input_mode.addItems(["foreground", "postmsg", "focus"])
+        idx = self._settings_input_mode.findText(
+            self.cmb_input_mode.currentText() if hasattr(self, 'cmb_input_mode') else "postmsg"
+        )
+        if idx >= 0:
+            self._settings_input_mode.setCurrentIndex(idx)
+        self._settings_input_mode.setStyleSheet(
+            "QComboBox { background: #2a2a2a; color: #e0e0e0; border: 1px solid #3a3a3a; "
+            "border-radius: 4px; padding: 4px 8px; font-size: 12px; }"
+        )
+        mode_layout.addWidget(self._settings_input_mode)
+
+        mode_desc = QLabel(
+            "foreground: 前台真实按键（需要窗口激活）\n"
+            "postmsg: 消息模式（后台发送，最稳定）\n"
+            "focus: 焦点模式（先激活窗口再按键）"
+        )
+        mode_desc.setStyleSheet("color: #888; font-size: 11px;")
+        mode_layout.addWidget(mode_desc)
+        layout.addWidget(mode_frame)
 
         # ── 画面截图方案 ──────────────────────────────────
         cap_label = QLabel("■ 画面截图方案")
@@ -1086,7 +1562,6 @@ class MainWindow(QMainWindow):
         self._capture_method_combo = QComboBox()
         for name in CAPTURE_METHODS:
             self._capture_method_combo.addItem(name)
-        # 尝试从 config 读取已有设置
         saved_method = getattr(self.config, "_capture_method", "")
         if saved_method:
             idx = self._capture_method_combo.findText(saved_method)
@@ -1144,7 +1619,18 @@ class MainWindow(QMainWindow):
             old_dpi = self.config.auto_dpi_scale
             new_dpi = self._settings_dpi_check.isChecked()
             self.config.auto_dpi_scale = new_dpi
-            # 持久化截图方案
+
+            # 保存窗口标题
+            new_title = self._settings_window_title.text().strip()
+            if new_title:
+                self._window_title = new_title
+
+            # 保存输入模式
+            self.config.input_mode = self._settings_input_mode.currentText()
+            if hasattr(self, 'cmb_input_mode'):
+                self.cmb_input_mode.setCurrentText(self.config.input_mode)
+
+            # 保存截图方案
             cap_name = self._capture_method_combo.currentText()
             self.config._capture_method = cap_name
             self.config.save()
@@ -1161,6 +1647,110 @@ class MainWindow(QMainWindow):
                     self._restart_app()
         btn_save.clicked.connect(_on_settings_save)
         btn_layout.addWidget(btn_save)
+        layout.addLayout(btn_layout)
+
+        dlg.exec_()
+
+    def _pick_window_for_settings(self, target_input: QLineEdit):
+        """弹出窗口选择器并将结果写入指定的 QLineEdit。"""
+        from PyQt5.QtWidgets import QDialog, QVBoxLayout, QLineEdit as QLE, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView
+        from PyQt5.QtCore import QTimer
+        from gameassistant.platform.window_win import list_windows
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("选择目标窗口")
+        dlg.resize(420, 380)
+        dlg.setStyleSheet("QDialog { background: #1e1e1e; }")
+        dlg.setWindowFlags(dlg.windowFlags() & ~Qt.WindowContextHelpButtonHint)
+
+        layout = QVBoxLayout(dlg)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(8)
+
+        search = QLE()
+        search.setPlaceholderText("输入关键词搜索窗口...")
+        search.setStyleSheet(
+            "QLineEdit { background: #2a2a2a; color: #e0e0e0; border: 1px solid #3a3a3a; "
+            "border-radius: 4px; padding: 6px 10px; font-size: 12px; }"
+        )
+        layout.addWidget(search)
+
+        table = QTableWidget(0, 2)
+        table.setHorizontalHeaderLabels(["窗口名称", "PID"])
+        table.horizontalHeader().setStretchLastSection(False)
+        table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        table.setSelectionMode(QAbstractItemView.SingleSelection)
+        table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        table.setAlternatingRowColors(False)
+        table.setShowGrid(False)
+        table.setStyleSheet(
+            "QTableWidget { background: #121212; border: 1px solid #3a3a3a; "
+            "border-radius: 4px; color: #e0e0e0; font-size: 12px; } "
+            "QTableWidget::item:selected { background: #2a3a6a; } "
+            "QHeaderView::section { background: #1e1e1e; color: #888; "
+            "border: none; padding: 4px; font-size: 11px; }"
+        )
+        table.verticalHeader().setVisible(False)
+        layout.addWidget(table)
+
+        def refresh_list(filter_text: str = ""):
+            all_windows = list_windows()
+            table.setRowCount(0)
+            for hwnd, title in all_windows:
+                if filter_text and filter_text.lower() not in title.lower():
+                    continue
+                row = table.rowCount()
+                table.insertRow(row)
+                name_item = QTableWidgetItem(title)
+                name_item.setData(Qt.UserRole, hwnd)
+                table.setItem(row, 0, name_item)
+                pid_item = QTableWidgetItem(str(hwnd))
+                pid_item.setTextAlignment(Qt.AlignCenter)
+                table.setItem(row, 1, pid_item)
+
+        refresh_list()
+
+        debounce = QTimer()
+        debounce.setSingleShot(True)
+        debounce.setInterval(300)
+        debounce.timeout.connect(lambda: refresh_list(search.text()))
+        search.textChanged.connect(lambda: debounce.start())
+
+        def on_accept():
+            row = table.currentRow()
+            if row < 0:
+                return
+            name_item = table.item(row, 0)
+            if name_item is None:
+                return
+            title = name_item.text()
+            if title:
+                target_input.setText(title)
+            dlg.accept()
+
+        table.cellDoubleClicked.connect(lambda r, c: on_accept())
+        search.returnPressed.connect(lambda: on_accept() if table.currentRow() >= 0 else None)
+
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        btn_ok = QPushButton("确定")
+        btn_ok.setStyleSheet(
+            "QPushButton { background: #6b8cff; color: white; border: none; "
+            "border-radius: 4px; padding: 6px 18px; font-size: 12px; font-weight: 600; }"
+            "QPushButton:hover { background: #5a7cef; }"
+        )
+        btn_ok.clicked.connect(on_accept)
+        btn_layout.addWidget(btn_ok)
+        btn_cancel = QPushButton("取消")
+        btn_cancel.setStyleSheet(
+            "QPushButton { background: #2a2a2a; color: #e0e0e0; border: 1px solid #3a3a3a; "
+            "border-radius: 4px; padding: 6px 18px; font-size: 12px; }"
+            "QPushButton:hover { background: #3a3a3a; }"
+        )
+        btn_cancel.clicked.connect(dlg.reject)
+        btn_layout.addWidget(btn_cancel)
         layout.addLayout(btn_layout)
 
         dlg.exec_()
@@ -1199,8 +1789,104 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "导出失败", f"无法导出配置:\n{e}")
 
     def _open_hotkey_dialog(self):
-        """打开快捷键设置对话框（占位）。"""
-        QMessageBox.information(self, "快捷键", "快捷键设置（待实现）")
+        """打开快捷键设置对话框。"""
+        dlg = QDialog(self)
+        dlg.setWindowTitle("快捷键设置")
+        dlg.resize(380, 240)
+        dlg.setStyleSheet("QDialog { background: #1e1e1e; }")
+        dlg.setWindowFlags(dlg.windowFlags() & ~Qt.WindowContextHelpButtonHint)
+        layout = QVBoxLayout(dlg)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
+
+        # ── 启用快捷键 ────────────────────────────────────
+        self._hotkey_dlg_enabled = QCheckBox("启用全局快捷键")
+        self._hotkey_dlg_enabled.setChecked(
+            self.hotkey_checkbox.isChecked() if hasattr(self, 'hotkey_checkbox') else True
+        )
+        self._hotkey_dlg_enabled.setStyleSheet("color: #e0e0e0; font-size: 12px;")
+        layout.addWidget(self._hotkey_dlg_enabled)
+
+        # ── 启动/停止快捷键 ───────────────────────────────
+        hk_label = QLabel("■ 启动/停止切换键")
+        hk_label.setStyleSheet(_SECTION_TITLE_STYLE)
+        layout.addWidget(hk_label)
+
+        hk_frame = QFrame()
+        hk_frame.setStyleSheet(
+            "QFrame { background: #1a1a1a; border: 1px solid #3a3a3a; border-radius: 6px; }"
+        )
+        hk_layout = QVBoxLayout(hk_frame)
+        hk_layout.setContentsMargins(8, 8, 8, 8)
+        hk_layout.setSpacing(6)
+
+        self._hotkey_dlg_combo = QComboBox()
+        populate_hotkey_combo(self._hotkey_dlg_combo)
+        current_hk = self.config.hotkey_toggle
+        if current_hk:
+            idx = self._hotkey_dlg_combo.findText(current_hk.upper())
+            if idx < 0:
+                idx = self._hotkey_dlg_combo.findText(current_hk.capitalize())
+            if idx >= 0:
+                self._hotkey_dlg_combo.setCurrentIndex(idx)
+        self._hotkey_dlg_combo.setStyleSheet(
+            "QComboBox { background: #2a2a2a; color: #e0e0e0; border: 1px solid #3a3a3a; "
+            "border-radius: 4px; padding: 4px 8px; font-size: 12px; }"
+        )
+        self._hotkey_dlg_combo.setEnabled(self._hotkey_dlg_enabled.isChecked())
+        self._hotkey_dlg_enabled.toggled.connect(self._hotkey_dlg_combo.setEnabled)
+        hk_layout.addWidget(self._hotkey_dlg_combo)
+
+        hk_desc = QLabel("按下该键可快速启动或停止脚本运行。")
+        hk_desc.setStyleSheet("color: #888; font-size: 11px;")
+        hk_layout.addWidget(hk_desc)
+        layout.addWidget(hk_frame)
+
+        layout.addStretch()
+
+        # ── 底部按钮 ──────────────────────────────────────
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        btn_save = QPushButton("保存设置")
+        btn_save.setStyleSheet(
+            "QPushButton { background: #6b8cff; color: white; border: none; "
+            "border-radius: 4px; padding: 8px 20px; font-size: 13px; font-weight: 600; }"
+            "QPushButton:hover { background: #5a7cef; }"
+        )
+        def _on_hotkey_save():
+            enabled = self._hotkey_dlg_enabled.isChecked()
+            new_hotkey = self._hotkey_dlg_combo.currentText().lower()
+
+            self.config.hotkey_enabled = enabled
+            self.config.hotkey_toggle = new_hotkey
+
+            # 同步到工具栏控件（如果还存在）
+            if hasattr(self, 'hotkey_checkbox'):
+                self.hotkey_checkbox.setChecked(enabled)
+            if hasattr(self, 'hotkey_combo'):
+                idx = self.hotkey_combo.findText(
+                    self._hotkey_dlg_combo.currentText()
+                )
+                if idx >= 0:
+                    self.hotkey_combo.setCurrentIndex(idx)
+
+            # 应用热键
+            if enabled:
+                if not self._hotkey_signal_connected:
+                    self._hotkey_mgr.hotkey_triggered.connect(self._on_hotkey_triggered)
+                    self._hotkey_signal_connected = True
+                self._hotkey_mgr.set_hotkey(new_hotkey)
+            else:
+                self._hotkey_mgr.unhook()
+
+            self.config.save()
+            self._status_log.setText("快捷键设置已保存")
+            dlg.accept()
+        btn_save.clicked.connect(_on_hotkey_save)
+        btn_layout.addWidget(btn_save)
+        layout.addLayout(btn_layout)
+
+        dlg.exec_()
 
     def _on_dpi_scale_toggled(self, checked: bool):
         """DPI 自适应缩放开关。"""
@@ -1263,8 +1949,7 @@ class MainWindow(QMainWindow):
 
     def _populate_form(self):
         """从 config 填充 UI 表单字段。"""
-        self._window_title = self.config.window_title
-        self.title_btn.setText(f" {self._window_title}")
+        self._window_title = self.config.window_title or "QQ三国"
 
         # 输入模式
         idx = self.cmb_input_mode.findText(self.config.input_mode)
@@ -1272,7 +1957,9 @@ class MainWindow(QMainWindow):
             self.cmb_input_mode.setCurrentIndex(idx)
 
         # 快捷键
+        self.hotkey_checkbox.blockSignals(True)
         self.hotkey_checkbox.setChecked(self.config.hotkey_enabled)
+        self.hotkey_checkbox.blockSignals(False)
         hk = self.config.hotkey_toggle.capitalize()
         idx = self.hotkey_combo.findText(hk, Qt.MatchFixedString)
         if idx >= 0:
@@ -1281,13 +1968,22 @@ class MainWindow(QMainWindow):
         self.debug_check.setChecked(self.config.debug)
         self.dpi_scale_check.setChecked(self.config.auto_dpi_scale)
 
-        # 间隔（来自 TaskQueue）
+        # 主动初始化热键（setChecked 若值不变不会触发 toggled 信号）
+        if self.config.hotkey_enabled:
+            self._hotkey_mgr.hotkey_triggered.connect(self._on_hotkey_triggered)
+            self._hotkey_signal_connected = True
+            self._hotkey_mgr.set_hotkey(self.config.hotkey_toggle)
+
+        # 屏蔽动作 + 串行循环（来自 TaskQueue）
         if self._task_queue is not None:
-            self.min_interval_spin.setValue(self._task_queue.min_action_interval)
-            self.min_interval_random_check.setChecked(self._task_queue.min_action_interval_random)
-            self.min_interval_min_spin.setValue(self._task_queue.min_action_interval_min)
-            self.min_interval_max_spin.setValue(self._task_queue.min_action_interval_max)
             self.cb_block_actions.setChecked(self._task_queue.block_actions_enabled)
+            self.seq_loop_check.blockSignals(True)
+            self.seq_loop_check.setChecked(self._task_queue.loop_forever)
+            self.seq_loop_check.blockSignals(False)
+            self.seq_loop_spin.blockSignals(True)
+            self.seq_loop_spin.setValue(self._task_queue.loop_count)
+            self.seq_loop_spin.blockSignals(False)
+            self.seq_loop_spin.setVisible(not self._task_queue.loop_forever)
 
     def _load_task_queue_config(self):
         """从文件加载任务队列配置。"""
@@ -1336,10 +2032,16 @@ class MainWindow(QMainWindow):
     # 其他设置
     # ═══════════════════════════════════════════════════════════
 
-    def _on_min_interval_random_toggled(self, checked: bool):
-        """最小动作间隔随机开关。"""
-        self._min_interval_min_widget.setVisible(checked)
-        self._min_interval_max_widget.setVisible(checked)
+    def _on_seq_loop_toggled(self, checked: bool):
+        """串行任务无限循环开关。"""
+        self.seq_loop_spin.setVisible(not checked)
+        if self._task_queue is not None:
+            self._task_queue.loop_forever = checked
+
+    def _on_seq_loop_count_changed(self, value: int):
+        """串行任务循环次数变化。"""
+        if self._task_queue is not None:
+            self._task_queue.loop_count = value
 
     def _on_block_actions_toggled(self, checked: bool):
         """屏蔽动作开关。"""
@@ -1439,6 +2141,7 @@ class MainWindow(QMainWindow):
         self.min_interval_spin.setRange(0, 5000)
         self.min_interval_spin.setValue(200)
         self.min_interval_spin.setSuffix(" ms")
+        self.min_interval_spin.valueChanged.connect(self._on_min_interval_changed)
         interval_layout.addWidget(self.min_interval_spin)
 
         self.min_interval_random_check = QCheckBox("区间随机")
@@ -1452,6 +2155,7 @@ class MainWindow(QMainWindow):
         self.min_interval_min_spin.setRange(0, 5000)
         self.min_interval_min_spin.setValue(100)
         self.min_interval_min_spin.setSuffix(" ms")
+        self.min_interval_min_spin.valueChanged.connect(self._on_min_interval_min_changed)
         min_int_row.addWidget(self.min_interval_min_spin)
         self._min_interval_min_widget = QWidget()
         self._min_interval_min_widget.setLayout(min_int_row)
@@ -1464,6 +2168,7 @@ class MainWindow(QMainWindow):
         self.min_interval_max_spin.setRange(0, 5000)
         self.min_interval_max_spin.setValue(300)
         self.min_interval_max_spin.setSuffix(" ms")
+        self.min_interval_max_spin.valueChanged.connect(self._on_min_interval_max_changed)
         max_int_row.addWidget(self.min_interval_max_spin)
         self._min_interval_max_widget = QWidget()
         self._min_interval_max_widget.setLayout(max_int_row)
@@ -1845,7 +2550,6 @@ class MainWindow(QMainWindow):
             title = name_item.text()
             if title:
                 self._window_title = title
-                self.title_btn.setText(f" {title}")
             dlg.accept()
 
         table.cellDoubleClicked.connect(lambda r, c: on_accept())
@@ -1920,8 +2624,11 @@ class MainWindow(QMainWindow):
         root_layout.addWidget(self._log_panel)
 
     def _toggle_log_panel(self):
-        visible = not self._log_panel.isVisible()
-        self._log_panel.setVisible(visible)
+        """切换日志面板的显示（通过 ADS Dock 可见性）。"""
+        if self._dock_log and self._dock_log.isVisible():
+            self._dock_log.closeDockWidget()
+        else:
+            self._dock_log.show()
 
     # ═══════════════════════════════════════════════════════════
     # 预览：定时截图刷新
@@ -1990,33 +2697,26 @@ class MainWindow(QMainWindow):
             logger.debug("预览截图失败: %s", e)
 
     def _toggle_preview(self):
-        """切换画面预览面板的显示。"""
-        if self._preview_widget and self._preview_widget.isVisible():
+        """切换画面预览面板的显示（通过 ADS Dock 可见性）。"""
+        if self._dock_preview and self._dock_preview.isVisible():
             # 关闭预览
             self._preview_capturing = False
             self._preview_timer.stop()
-            self._preview_widget.setVisible(False)
-            # 从布局中移除
-            parent_layout = self._preview_widget.parent().layout()
-            if parent_layout:
-                parent_layout.removeWidget(self._preview_widget)
-            self._preview_widget = None
+            if self._preview_widget:
+                self._preview_widget.setParent(None)
+                self._preview_widget.deleteLater()
+                self._preview_widget = None
+            self._dock_preview.closeDockWidget()
             self._preview_hwnd = 0
         else:
-            # 从中央分割区左侧面板获取父容器
-            splitter = self.findChild(QSplitter)
-            if not splitter:
-                return
-            left_panel = splitter.widget(0)
-            if not left_panel:
-                return
+            # 创建预览控件
+            if self._preview_widget is None:
+                self._preview_widget = PreviewWidget()
+                self._preview_widget.setMinimumHeight(120)
+                self._preview_container.layout().addWidget(self._preview_widget)
 
-            # 创建预览控件插入左面板顶部
-            self._preview_widget = PreviewWidget()
-            self._preview_widget.setMinimumHeight(120)
-            layout = left_panel.layout()
-            if layout:
-                layout.insertWidget(0, self._preview_widget, 1)
+            # 显示预览 dock
+            self._dock_preview.show()
 
             # 获取窗口标题并查找句柄
             title = self._window_title
@@ -2032,10 +2732,3 @@ class MainWindow(QMainWindow):
     def _toggle_debug_log(self):
         """切换调试日志面板。"""
         self._toggle_log_panel()
-
-    def _reset_layout(self):
-        """重置窗口布局为默认比例。"""
-        splitter = self.findChild(QSplitter)
-        if splitter:
-            total = splitter.width() or 800
-            splitter.setSizes([int(total * 0.25), int(total * 0.5), int(total * 0.25)])

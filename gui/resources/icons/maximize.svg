@@ -1,3 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">
-  <rect x="3" y="3" width="10" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="2"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <defs>
+    <style>
+      .cls-1 {
+        fill: #fff;
+        fill-rule: evenodd;
+      }
+    </style>
+  </defs>
+  <path id="Canvas" class="cls-1" d="M10.969,14H5.031A3.031,3.031,0,0,1,2,10.969V5.031A3.031,3.031,0,0,1,5.031,2h5.938A3.031,3.031,0,0,1,14,5.031v5.938A3.031,3.031,0,0,1,10.969,14ZM12,5a1,1,0,0,0-1-1H5A1,1,0,0,0,4,5v6a1,1,0,0,0,1,1h6a1,1,0,0,0,1-1V5Z"/>
 </svg>

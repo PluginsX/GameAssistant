@@ -66,19 +66,32 @@ echo.
 echo   [1] One-file mode  - single GameAssistant.exe (default)
 echo   [2] Directory mode - GameAssistant.exe + files
 echo.
-echo   Auto-select [1] after 60 seconds
-echo.
 echo ============================================================
 echo.
 
-choice /C 12 /N /T 60 /D 1 /M "Press [1/2]: "
-if errorlevel 2 (
-    set "MODE=dir"
-) else (
+set "USER_INPUT="
+set /p "USER_INPUT=Enter choice [1/2] (default 1): "
+
+if not defined USER_INPUT (
     set "MODE=onefile"
+    goto :DoBuild
 )
 
-goto :DoBuild
+if "%USER_INPUT%"=="1" (
+    set "MODE=onefile"
+    goto :DoBuild
+)
+
+if "%USER_INPUT%"=="2" (
+    set "MODE=dir"
+    goto :DoBuild
+)
+
+echo.
+echo [WARN] Invalid choice: %USER_INPUT%
+echo Please enter 1 or 2.
+pause
+goto :ShowMenu
 
 :DoBuild
 if "%MODE%"=="onefile" (
@@ -154,6 +167,8 @@ cd /d "%PROJECT_DIR%"
     --hidden-import "gameassistant.platform.window_win" ^
     --hidden-import "gameassistant.worker.qt_worker" ^
     --hidden-import "PyQt5.QtSvg" ^
+    --hidden-import "PyQtAds" ^
+    --hidden-import "PyQtAds.ads" ^
     --exclude-module "tkinter" ^
     --exclude-module "matplotlib" ^
     --exclude-module "scipy" ^
@@ -206,8 +221,5 @@ if "%MODE%"=="dir" (
 )
 echo ============================================================
 echo.
-
-echo [INFO] Opening output folder...
-@REM start "" "%BUILD_DIR%"
 
 endlocal

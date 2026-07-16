@@ -1,40 +1,31 @@
 {
   "version": 1,
   "loop_forever": true,
+  "loop_count": 1,
   "tasks": [
     {
-      "name": "任务 1",
-      "enabled": true,
+      "name": "C",
+      "enabled": false,
       "task_type": "independent",
       "repeat": 1,
       "events": [
         {
           "type": "keyclick",
           "keys": [
-            "Alt",
-            "W"
-          ]
-        },
-        {
-          "type": "keyclick",
-          "keys": [
-            "Alt",
-            "E"
-          ]
-        },
-        {
-          "type": "keyclick",
-          "keys": [
             "C"
           ]
         }
-      ]
+      ],
+      "min_action_interval": 0,
+      "min_action_interval_random": false,
+      "min_action_interval_min": 50,
+      "min_action_interval_max": 100
     },
     {
-      "name": "任务 2",
+      "name": "攻击",
       "enabled": true,
       "task_type": "sequential",
-      "repeat": 1,
+      "repeat": 5,
       "events": [
         {
           "type": "keyclick",
@@ -77,26 +68,102 @@
           "keys": [
             "E"
           ]
+        }
+      ],
+      "min_action_interval": 50,
+      "min_action_interval_random": true,
+      "min_action_interval_min": 50,
+      "min_action_interval_max": 80
+    },
+    {
+      "name": "巡逻",
+      "enabled": true,
+      "task_type": "sequential",
+      "repeat": 1,
+      "events": [
+        {
+          "type": "keydown",
+          "keys": [
+            "Left"
+          ]
         },
+        {
+          "type": "wait",
+          "ms": 1000
+        },
+        {
+          "type": "keyup",
+          "keys": [
+            "Left"
+          ]
+        },
+        {
+          "type": "wait",
+          "ms": 50
+        },
+        {
+          "type": "keydown",
+          "keys": [
+            "Right"
+          ]
+        },
+        {
+          "type": "wait",
+          "ms": 1000
+        },
+        {
+          "type": "keyup",
+          "keys": [
+            "Right"
+          ]
+        }
+      ],
+      "min_action_interval": 0,
+      "min_action_interval_random": false,
+      "min_action_interval_min": 100,
+      "min_action_interval_max": 300
+    },
+    {
+      "name": "R",
+      "enabled": false,
+      "task_type": "independent",
+      "repeat": 1,
+      "events": [
         {
           "type": "keyclick",
           "keys": [
             "R"
           ]
-        },
+        }
+      ],
+      "min_action_interval": 0,
+      "min_action_interval_random": false,
+      "min_action_interval_min": 100,
+      "min_action_interval_max": 300
+    },
+    {
+      "name": "T",
+      "enabled": false,
+      "task_type": "independent",
+      "repeat": 1,
+      "events": [
         {
           "type": "keyclick",
           "keys": [
             "T"
           ]
         }
-      ]
+      ],
+      "min_action_interval": 0,
+      "min_action_interval_random": false,
+      "min_action_interval_min": 100,
+      "min_action_interval_max": 300
     }
   ],
   "block_actions_enabled": false,
   "blocked_actions": [],
   "min_action_interval": 200,
-  "min_action_interval_random": false,
-  "min_action_interval_min": 100,
-  "min_action_interval_max": 300
+  "min_action_interval_random": true,
+  "min_action_interval_min": 50,
+  "min_action_interval_max": 100
 }

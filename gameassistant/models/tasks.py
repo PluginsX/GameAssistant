@@ -225,7 +225,6 @@ class TaskEvent:
         return "?"
 
     def get_color(self) -> str:
-        """返回积木颜色（hex 格式）。"""
         colors = {
             "keydown": "#3B82F6",       # 蓝色
             "keyup": "#8B5CF6",         # 紫色
@@ -254,6 +253,10 @@ class Task:
     task_type: str = "sequential"
     repeat: int = 1
     events: list[TaskEvent] = field(default_factory=list)
+    min_action_interval: int = 200
+    min_action_interval_random: bool = False
+    min_action_interval_min: int = 100
+    min_action_interval_max: int = 300
 
     def to_dict(self) -> dict:
         return {
@@ -262,6 +265,10 @@ class Task:
             "task_type": self.task_type,
             "repeat": self.repeat,
             "events": [e.to_dict() for e in self.events],
+            "min_action_interval": self.min_action_interval,
+            "min_action_interval_random": self.min_action_interval_random,
+            "min_action_interval_min": self.min_action_interval_min,
+            "min_action_interval_max": self.min_action_interval_max,
         }
 
     @classmethod
@@ -308,6 +315,14 @@ class Task:
         repeat_raw = d.get("repeat", 1)
         repeat = _clamp(int(repeat_raw), 1, 999) if isinstance(repeat_raw, (int, float)) else 1
 
+        def _safe_int_task(val, default):
+            return _clamp(int(val), 0, 99999) if isinstance(val, (int, float)) else default
+
+        min_action_interval = _safe_int_task(d.get("min_action_interval"), 200)
+        min_action_interval_random = bool(d.get("min_action_interval_random", False))
+        min_action_interval_min = _safe_int_task(d.get("min_action_interval_min"), 100)
+        min_action_interval_max = _safe_int_task(d.get("min_action_interval_max"), 300)
+
         raw_events = d.get("events", [])
         if not isinstance(raw_events, list):
             raw_events = []
@@ -329,7 +344,20 @@ class Task:
             task_type=task_type,
             repeat=repeat,
             events=valid_events,
+            min_action_interval=min_action_interval,
+            min_action_interval_random=min_action_interval_random,
+            min_action_interval_min=min_action_interval_min,
+            min_action_interval_max=min_action_interval_max,
         )
+
+    def get_action_interval_ms(self) -> int:
+        """获取该任务的动作间隔时长（毫秒），若启用随机则返回随机值。"""
+        if self.min_action_interval_random:
+            return random.randint(
+                min(self.min_action_interval_min, self.min_action_interval_max),
+                max(self.min_action_interval_min, self.min_action_interval_max)
+            )
+        return self.min_action_interval
 
 
 @dataclass
@@ -347,6 +375,7 @@ class TaskQueue:
         min_action_interval_max: 随机最小动作间隔的最大值(毫秒)
     """
     loop_forever: bool = True
+    loop_count: int = 1
     tasks: list[Task] = field(default_factory=list)
     block_actions_enabled: bool = False
     blocked_actions: list[str] = field(default_factory=list)
@@ -359,6 +388,7 @@ class TaskQueue:
         return {
             "version": 1,
             "loop_forever": self.loop_forever,
+            "loop_count": self.loop_count,
             "tasks": [t.to_dict() for t in self.tasks],
             "block_actions_enabled": self.block_actions_enabled,
             "blocked_actions": list(self.blocked_actions),
@@ -442,6 +472,7 @@ class TaskQueue:
 
         return cls(
             loop_forever=bool(d.get("loop_forever", True)),
+            loop_count=_clamp(int(d.get("loop_count", 1)), 1, 9999) if isinstance(d.get("loop_count", 1), (int, float)) else 1,
             tasks=valid_tasks,
             block_actions_enabled=bool(d.get("block_actions_enabled", False)),
             blocked_actions=blocked_actions,

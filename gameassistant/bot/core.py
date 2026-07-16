@@ -43,29 +43,24 @@ class SanguoBot:
 
     def __init__(self, config: BotConfig, frame_callback: Optional[Callable] = None):
         self.config = config
-        # 优先使用手动选择的窗口句柄，否则按标题自动查找
         if getattr(config, '_target_hwnd', 0):
             self.hwnd = config._target_hwnd
             logger.info("使用手动选择的窗口句柄: %s", self.hwnd)
         else:
             self.hwnd = get_hwnd(config.window_title)
-        # 根据执行模式决定初始状态
         if config.execution_mode == "task_queue":
             self.state = BotState.TASK_QUEUE
         else:
             self.state = BotState.KEY_LOOP
         self._running = True
-        self.frame_callback = frame_callback  # 调试帧回调 (QImage) -> None
-        self._tick_count = 0  # 用于帧降频
-        # 测试按键队列：GUI 端调用 request_test_key 追加，_tick 中消费
+        self.frame_callback = frame_callback
+        self._tick_count = 0
         self._test_key_queue: list[int] = []
-        # 任务队列（由 GUI 设置）
         self.task_queue: Optional[TaskQueue] = None
-        # 已按下的按键集合（用于停止时释放，防止卡键）
         self._pressed_keys: set[int] = set()
-        # 顺序类型任务的执行索引（循环跟踪当前该执行哪一个顺序任务）
         self._seq_task_index: int = 0
-        # 独立任务执行状态：{task_id: {"event_idx": int, "repeat_idx": int, "wait_until": float}}
+        self._seq_state: dict = {"event_idx": 0, "repeat_idx": 0, "wait_until": 0.0}
+        self._seq_loop_completed: int = 0
         self._ind_task_states: dict[int, dict] = {}
 
     def run(self) -> None:
@@ -147,13 +142,11 @@ class SanguoBot:
 
     def _tick(self) -> None:
         """单次状态机循环。"""
-        # 优先消费测试按键队列（GUI 通过 request_test_key 追加）
         while self._test_key_queue:
             vk = self._test_key_queue.pop(0)
             logger.info("测试按键已发送: 0x%02X", vk)
             send_key(self.hwnd, vk, mode=self.config.input_mode)
 
-        # 热更新窗口标题：检测 dirty 标志，重新获取 hwnd
         if self.config._hwnd_dirty:
             self.config._hwnd_dirty = False
             new_hwnd = get_hwnd(self.config.window_title)
@@ -164,17 +157,15 @@ class SanguoBot:
                 logger.warning("窗口标题变更后未找到窗口: %s",
                              self.config.window_title)
 
-        # 每轮先检测最小化状态（守护逻辑）
         if is_minimized(self.hwnd):
             if self.state != BotState.PAUSED:
                 logger.warning("窗口已最小化，脚本暂停。请恢复窗口以继续。")
                 self.state = BotState.PAUSED
-            self._interruptible_sleep(2.0)  # 暂停时降低轮询频率 + 可中断
+            self._interruptible_sleep(2.0)
             return
 
         if self.state == BotState.PAUSED:
             logger.info("窗口已恢复，脚本继续运行")
-            # 恢复时根据执行模式选择状态
             if self.config.execution_mode == "task_queue":
                 self.state = BotState.TASK_QUEUE
             else:
@@ -182,7 +173,6 @@ class SanguoBot:
 
         self._tick_count += 1
 
-        # 调试可视化：每 3 轮截图发送到 GUI
         if self.config.debug and self.frame_callback and self._tick_count % 3 == 0:
             img = capture_window(self.hwnd)
             if img and img.size != (1, 1):
@@ -197,13 +187,11 @@ class SanguoBot:
                     preview = img
                 self.frame_callback(preview, [], [])
 
-        # 状态机分发
         if self.state == BotState.KEY_LOOP:
             self._handle_key_loop()
         elif self.state == BotState.TASK_QUEUE:
             self._handle_task_queue()
 
-        # 主循环随机延迟
         self._interruptible_sleep(random.uniform(*self.config.loop_delay))
 
     # ------------------------------------------------------------------
@@ -213,9 +201,8 @@ class SanguoBot:
     def _handle_key_loop(self) -> None:
         """纯按键循环模式：按配置循环发送技能/拾取键。"""
         if not self.config.enable_key_loop:
-            return  # 按键循环未启用，空转等待
+            return
 
-        # 循环发送技能键（若为空则跳过）
         if self.config.attack_keys:
             for rnd in range(self.config.attack_rounds):
                 if not self._running:
@@ -229,99 +216,130 @@ class SanguoBot:
                     if not self._interruptible_sleep(random.uniform(*self.config.attack_delay)):
                         return
 
-        # 穿插发送拾取键（仅在启用拾取时）
         if self.config.enable_pickup and self._running:
             logger.debug("按键循环 拾取 (键码 0x%02X)", self.config.pickup_key)
             send_key(self.hwnd, self.config.pickup_key, mode=self.config.input_mode)
             self._interruptible_sleep(random.uniform(0.3, 0.6))
 
     def _handle_task_queue(self) -> None:
-        """任务队列模式：按顺序执行顺序任务，同时独立任务自我循环。"""
+        """任务队列模式：顺序任务与独立任务均按时间分片执行，每 tick 各推进一步。"""
         if self.task_queue is None:
             logger.warning("任务队列为空，请先在编辑器中创建任务")
             return
 
         mode = self.config.input_mode
 
-        # ------------------------------------------------------------------
-        # 顺序类型任务：按列表顺序逐个执行，全部完成后回到第一个
-        # ------------------------------------------------------------------
         seq_tasks = self.task_queue.get_sequential_enabled()
         if seq_tasks:
-            # 确保索引在有效范围内
             if self._seq_task_index >= len(seq_tasks):
                 self._seq_task_index = 0
+                self._seq_state = {"event_idx": 0, "repeat_idx": 0, "wait_until": 0.0}
             task = seq_tasks[self._seq_task_index]
             if self._running:
-                self._execute_task_events(task, mode)
-                # 当前任务执行完毕，移到下一个
-                self._seq_task_index += 1
-                if self._seq_task_index >= len(seq_tasks):
-                    if self.task_queue.loop_forever:
-                        self._seq_task_index = 0
-                        logger.debug("顺序任务一轮完成，循环继续")
-                    else:
-                        logger.info("顺序任务全部执行完毕（非循环模式）")
-                        self._running = False
+                finished = self._advance_task_step(task, self._seq_state, mode, prefix="")
+                if finished:
+                    self._seq_task_index += 1
+                    self._seq_state = {"event_idx": 0, "repeat_idx": 0, "wait_until": 0.0}
+                    if self._seq_task_index >= len(seq_tasks):
+                        self._seq_loop_completed += 1
+                        if self.task_queue.loop_forever:
+                            self._seq_task_index = 0
+                            logger.debug("顺序任务第 %d 轮完成，继续循环", self._seq_loop_completed)
+                        else:
+                            if self._seq_loop_completed >= self.task_queue.loop_count:
+                                logger.info("顺序任务全部执行完毕（共 %d 轮）", self._seq_loop_completed)
+                                self._running = False
+                            else:
+                                self._seq_task_index = 0
+                                logger.info("顺序任务第 %d/%d 轮完成，继续下一轮",
+                                            self._seq_loop_completed, self.task_queue.loop_count)
 
-        # ------------------------------------------------------------------
-        # 独立类型任务：每个任务每 tick 只推进一个 event（时间分片）
-        # 与顺序任务并行执行，互不阻塞
-        # ------------------------------------------------------------------
         ind_tasks = self.task_queue.get_independent_enabled()
         for task in ind_tasks:
             if not self._running:
                 return
             self._advance_independent_task(task, mode)
 
-    def _execute_task_events(self, task: Task, mode: str) -> None:
-        """执行单个任务的所有事件（含重复次数）。
+    def _advance_task_step(self, task: Task, state: dict, mode: str, prefix: str = "") -> bool:
+        """推进任务一个事件步（时间分片）。
+
+        每 tick 调用一次，只执行当前事件，等待类事件设置 wait_until 后返回。
+        事件执行完自动推进索引，所有 repeat 轮次完成返回 True。
 
         Args:
-            task: 要执行的任务。
-            mode: 输入模式，传递到按键发送函数。
+            task: 任务对象。
+            state: 任务执行状态字典（event_idx, repeat_idx, wait_until）。
+            mode: 输入模式。
+            prefix: 日志前缀（如 "[独立] "）。
+
+        Returns:
+            True 表示该任务的所有 repeat 轮次都已完成，False 表示还在执行中。
         """
-        for rnd in range(task.repeat):
-            if not self._running:
-                return
-            logger.info("执行任务: %s (轮次 %d/%d)",
-                        task.name, rnd + 1, task.repeat)
-            for event in task.events:
-                if not self._running:
-                    return
-                if self.task_queue.is_event_blocked(event):
-                    logger.debug("  [屏蔽] %s", event.get_display_text())
-                    continue
-                etype = event.type
-                if etype == "keydown":
-                    vk_codes = event.vk_codes
-                    logger.debug("  \u2193 %s", event.get_display_text())
-                    send_keys_down(self.hwnd, vk_codes, mode=mode)
-                    self._pressed_keys.update(vk_codes)
-                elif etype == "keyup":
-                    vk_codes = event.vk_codes
-                    logger.debug("  \u2191 %s", event.get_display_text())
-                    send_keys_up(self.hwnd, vk_codes, mode=mode)
-                    for vk in vk_codes:
-                        self._pressed_keys.discard(vk)
-                elif etype == "keyclick":
-                    vk_codes = event.vk_codes
-                    logger.debug("  \u2195 %s", event.get_display_text())
-                    send_keys(self.hwnd, vk_codes, mode=mode)
-                elif etype == "wait":
-                    logger.debug("  \u23F1 等待 %dms", event.ms)
-                    if not self._interruptible_sleep(event.ms / 1000.0):
-                        return
-                elif etype == "wait_random":
-                    wait_s = random.uniform(event.min_ms, event.max_ms) / 1000.0
-                    logger.debug("  \u23F1 随机等待 %.0fms", wait_s * 1000)
-                    if not self._interruptible_sleep(wait_s):
-                        return
-                if etype in ("keydown", "keyup", "keyclick"):
-                    interval_ms = self.task_queue.get_action_interval_ms()
-                    if interval_ms > 0:
-                        if not self._interruptible_sleep(interval_ms / 1000.0):
-                            return
+        events = task.events
+        if not events:
+            return True
+
+        if state["wait_until"] > time.time():
+            return False
+
+        state["wait_until"] = 0.0
+
+        if state["event_idx"] == 0 and state["repeat_idx"] == 0:
+            if prefix:
+                logger.info("%s任务 '%s' 启动", prefix, task.name)
+            else:
+                logger.info("执行任务: %s (轮次 1/%d)", task.name, task.repeat)
+
+        event = events[state["event_idx"]]
+
+        if not self.task_queue.is_event_blocked(event):
+            etype = event.type
+            if etype == "keydown":
+                vk_codes = event.vk_codes
+                logger.info("%s↓ %s", prefix, event.get_display_text())
+                send_keys_down(self.hwnd, vk_codes, mode=mode)
+                self._pressed_keys.update(vk_codes)
+            elif etype == "keyup":
+                vk_codes = event.vk_codes
+                logger.info("%s↑ %s", prefix, event.get_display_text())
+                send_keys_up(self.hwnd, vk_codes, mode=mode)
+                for vk in vk_codes:
+                    self._pressed_keys.discard(vk)
+            elif etype == "keyclick":
+                vk_codes = event.vk_codes
+                logger.info("%s↕ %s", prefix, event.get_display_text())
+                send_keys(self.hwnd, vk_codes, mode=mode)
+            elif etype == "wait":
+                wait_s = event.ms / 1000.0
+                logger.debug("%s⏱ 等待 %dms", prefix, event.ms)
+                state["wait_until"] = time.time() + wait_s
+            elif etype == "wait_random":
+                wait_s = random.uniform(event.min_ms, event.max_ms) / 1000.0
+                logger.debug("%s⏱ 随机等待 %.0fms", prefix, wait_s * 1000)
+                state["wait_until"] = time.time() + wait_s
+            if etype in ("keydown", "keyup", "keyclick"):
+                interval_ms = task.get_action_interval_ms()
+                if interval_ms > 0:
+                    state["wait_until"] = time.time() + (interval_ms / 1000.0)
+
+        state["event_idx"] += 1
+
+        if state["event_idx"] >= len(events):
+            state["event_idx"] = 0
+            state["repeat_idx"] += 1
+            if state["repeat_idx"] >= task.repeat:
+                state["repeat_idx"] = 0
+                if prefix:
+                    logger.info("%s任务 '%s' 一轮完成，继续循环", prefix, task.name)
+                else:
+                    logger.info("任务 '%s' 执行完成（共 %d 轮）", task.name, task.repeat)
+                return True
+            else:
+                if not prefix:
+                    logger.info("执行任务: %s (轮次 %d/%d)",
+                                task.name, state["repeat_idx"] + 1, task.repeat)
+
+        return False
 
     def _advance_independent_task(self, task: Task, mode: str) -> None:
         """独立任务每 tick 推进一个事件（时间分片调度）。
@@ -337,71 +355,7 @@ class SanguoBot:
         task_id = id(task)
         state = self._ind_task_states.get(task_id)
         if state is None:
-            # 初始化任务状态
             state = {"event_idx": 0, "repeat_idx": 0, "wait_until": 0.0}
             self._ind_task_states[task_id] = state
 
-        # 如果当前在等待中，检查是否已到时间
-        if state["wait_until"] > time.time():
-            return  # 等待尚未结束，本次 tick 跳过
-
-        state["wait_until"] = 0.0  # 清除等待标志
-
-        events = task.events
-        if not events:
-            return
-
-        # 获取当前要执行的事件
-        event = events[state["event_idx"]]
-
-        # 检查屏蔽
-        if self.task_queue.is_event_blocked(event):
-            pass  # 被屏蔽的事件直接跳过，不消耗 tick
-        else:
-            etype = event.type
-            if etype == "keydown":
-                vk_codes = event.vk_codes
-                logger.debug("[独立] \u2193 %s", event.get_display_text())
-                send_keys_down(self.hwnd, vk_codes, mode=mode)
-                self._pressed_keys.update(vk_codes)
-            elif etype == "keyup":
-                vk_codes = event.vk_codes
-                logger.debug("[独立] \u2191 %s", event.get_display_text())
-                send_keys_up(self.hwnd, vk_codes, mode=mode)
-                for vk in vk_codes:
-                    self._pressed_keys.discard(vk)
-            elif etype == "keyclick":
-                vk_codes = event.vk_codes
-                logger.debug("[独立] \u2195 %s", event.get_display_text())
-                send_keys(self.hwnd, vk_codes, mode=mode)
-            elif etype == "wait":
-                wait_s = event.ms / 1000.0
-                logger.debug("[独立] \u23F1 等待 %dms", event.ms)
-                state["wait_until"] = time.time() + wait_s
-                # 如果 wait 很短(< tick 间隔)，立即完成等待，继续推进
-                # 否则返回，等下一个 tick 到来时检查 wait_until
-                if state["wait_until"] > time.time():
-                    return  # 需要等待，下个 tick 再继续
-            elif etype == "wait_random":
-                wait_s = random.uniform(event.min_ms, event.max_ms) / 1000.0
-                logger.debug("[独立] \u23F1 随机等待 %.0fms", wait_s * 1000)
-                state["wait_until"] = time.time() + wait_s
-                if state["wait_until"] > time.time():
-                    return
-            if etype in ("keydown", "keyup", "keyclick"):
-                interval_ms = self.task_queue.get_action_interval_ms()
-                if interval_ms > 0:
-                    state["wait_until"] = time.time() + (interval_ms / 1000.0)
-
-        # 推进到下一个事件
-        state["event_idx"] += 1
-
-        # 检查当前 repeat 轮次是否完成
-        if state["event_idx"] >= len(events):
-            state["event_idx"] = 0
-            state["repeat_idx"] += 1
-            # 检查所有 repeat 轮次是否完成
-            if state["repeat_idx"] >= task.repeat:
-                state["repeat_idx"] = 0  # 独立任务无限循环
-                logger.debug("[独立] 任务 '%s' 一轮完成，继续循环", task.name)
-
+        self._advance_task_step(task, state, mode, prefix="[独立] ")

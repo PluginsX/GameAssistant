@@ -4,3 +4,4 @@ PyQt5>=5.15.0
 pydirectinput>=1.0.4
 keyboard>=0.13.5
 pyinstaller>=6.0.0
+PyQtAds>=3.8.0

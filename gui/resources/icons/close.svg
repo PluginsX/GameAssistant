@@ -1,4 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="16" height="16">
-  <line x1="5" y1="5" x2="11" y2="11" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-  <line x1="11" y1="5" x2="5" y2="11" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <defs>
+    <style>
+      .cls-1 {
+        fill: #fff;
+        fill-rule: evenodd;
+      }
+    </style>
+  </defs>
+  <path id="Canvas" class="cls-1" d="M10.3,11.712L8,9.414l-2.3,2.3A1,1,0,0,1,4.288,10.3L6.586,8l-2.3-2.3A1,1,0,0,1,5.7,4.288L8,6.586l2.3-2.3A1,1,0,0,1,11.712,5.7L9.414,8l2.3,2.3A1,1,0,0,1,10.3,11.712Z"/>
 </svg>

@@ -364,6 +364,7 @@ class Win32WindowController(WindowController):
     def send_keys_down(self, hwnd: int, vk_codes: list[int], mode: str = "foreground") -> None:
         """按下复合按键群（覆盖基类）。"""
         if not vk_codes:
+            logger.warning("send_keys_down: vk_codes 为空，跳过发送")
             return
 
         if mode == "postmsg":
@@ -405,6 +406,7 @@ class Win32WindowController(WindowController):
     def send_keys_up(self, hwnd: int, vk_codes: list[int], mode: str = "foreground") -> None:
         """松开复合按键群（覆盖基类）。"""
         if not vk_codes:
+            logger.warning("send_keys_up: vk_codes 为空，跳过发送")
             return
 
         if mode == "postmsg":
@@ -474,10 +476,11 @@ class Win32WindowController(WindowController):
         """
         scan = _VK_TO_SCAN.get(vk_code, vk_code)
         is_alt = vk_code == 0x12
+        is_extended = vk_code in _EXTENDED_KEYS
         msg_down = 0x0104 if is_alt else 0x0100
         msg_up = 0x0105 if is_alt else 0x0101
-        lparam_down = (scan << 16) | 1
-        lparam_up = (scan << 16) | 0xC0000001
+        lparam_down = (scan << 16) | (0x01000000 if is_extended else 0) | 1
+        lparam_up = (scan << 16) | (0x01000000 if is_extended else 0) | 0xC0000001
         if is_alt:
             lparam_down |= 0x20000000
             lparam_up |= 0x20000000
@@ -498,7 +501,15 @@ class Win32WindowController(WindowController):
         scan = _VK_TO_SCAN.get(vk_code, vk_code)
         is_extended = vk_code in _EXTENDED_KEYS
         msg = 0x0104 if syskey else 0x0100  # WM_SYSKEYDOWN / WM_KEYDOWN
-        lparam = (scan << 16) | (0x10000 if is_extended else 0) | 1
+        # lParam 结构（32 位）：
+        #   bits 0-15:   重复计数 (1)
+        #   bits 16-23:  扫描码
+        #   bit 24:      扩展键标志 (1=扩展键)
+        #   bits 25-28:  保留 (0)
+        #   bit 29:      上下文代码 (Alt=1)
+        #   bit 30:      上一键状态 (0=之前抬起)
+        #   bit 31:      转换状态 (0=按下)
+        lparam = (scan << 16) | (0x01000000 if is_extended else 0) | 1
         if syskey:
             lparam |= 0x20000000  # 设置 bit 29（context code=1，表示 Alt 按下）
         win32gui.PostMessage(hwnd, msg, vk_code, lparam)
@@ -515,7 +526,15 @@ class Win32WindowController(WindowController):
         scan = _VK_TO_SCAN.get(vk_code, vk_code)
         is_extended = vk_code in _EXTENDED_KEYS
         msg = 0x0105 if syskey else 0x0101  # WM_SYSKEYUP / WM_KEYUP
-        lparam = (scan << 16) | (0x10000 if is_extended else 0) | 0xC0000001
+        # lParam 结构（32 位）：
+        #   bits 0-15:   重复计数 (1)
+        #   bits 16-23:  扫描码
+        #   bit 24:      扩展键标志 (1=扩展键)
+        #   bits 25-28:  保留 (0)
+        #   bit 29:      上下文代码 (Alt=1)
+        #   bit 30:      上一键状态 (1=之前按下)
+        #   bit 31:      转换状态 (1=松开)
+        lparam = (scan << 16) | (0x01000000 if is_extended else 0) | 0xC0000001
         if syskey:
             lparam |= 0x20000000  # 设置 bit 29（context code=1）
         win32gui.PostMessage(hwnd, msg, vk_code, lparam)

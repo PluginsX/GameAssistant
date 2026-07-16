@@ -102,3 +102,128 @@ QSplitter::handle:vertical { height: 3px; }
 QFrame#taskPanel { background: #1e1e1e; border: 1px solid #3a3a3a; border-radius: 8px; }
 QToolTip { background: #1e1e1e; color: #e8e8e8; border: 1px solid #3a3a3a; padding: 4px 8px; border-radius: 4px; }
 """
+
+# ---------------------------------------------------------------------------
+# ADS（Qt Advanced Docking System）深色主题样式
+# ---------------------------------------------------------------------------
+ADS_STYLE_SHEET = """
+/* 停靠容器背景 */
+ads--CDockContainerWidget {
+    background: #121212;
+}
+
+/* 停靠区域 */
+ads--CDockAreaWidget {
+    background: #121212;
+}
+
+/* 停靠区域标签栏 — 紧凑高度 */
+ads--CDockAreaTabBar {
+    background: #1a1a1a;
+    border-bottom: 1px solid #2a2a2a;
+    padding: 0px;
+    max-height: 26px;
+    min-height: 26px;
+}
+
+/* 停靠标签页 — 紧凑高度 + 紧凑内边距 */
+ads--CDockWidgetTab {
+    background: #2a2a2a;
+    color: #a0a0a0;
+    padding: 2px 6px;
+    border: 1px solid #3a3a3a;
+    border-bottom: none;
+    border-radius: 3px 3px 0 0;
+    margin-right: 1px;
+    font-size: 11px;
+    font-weight: 500;
+    max-height: 24px;
+    min-height: 24px;
+}
+
+ads--CDockWidgetTab[activeTab="true"] {
+    background: #1e1e1e;
+    color: #6b8cff;
+    border-bottom: 2px solid #6b8cff;
+}
+
+ads--CDockWidgetTab:hover {
+    background: #333333;
+    color: #d0d0d0;
+}
+
+/* 区域标题栏 — 紧凑高度 24px */
+ads--CDockAreaTitleBar {
+    background: #1a1a1a;
+    border-bottom: 1px solid #2a2a2a;
+    padding: 0px 4px;
+    max-height: 24px;
+    min-height: 24px;
+}
+
+/* 标题栏按钮 — 缩小 + 浅灰色图标 */
+ads--CTitleBarButton {
+    background: transparent;
+    border: none;
+    border-radius: 2px;
+    padding: 0px;
+    max-width: 18px;
+    max-height: 18px;
+    min-width: 18px;
+    min-height: 18px;
+    color: #c8c8c8;
+}
+
+ads--CTitleBarButton:hover {
+    background: #3a3a3a;
+}
+
+ads--CTitleBarButton#CloseButton:hover {
+    background: #e81123;
+}
+
+/* 弹性标签文字 */
+ads--CElidingLabel {
+    color: #a0a0a0;
+    background: transparent;
+    font-size: 11px;
+    padding: 0px 4px;
+}
+
+/* 分割器 */
+ads--CDockSplitter {
+    background: #2a2a2a;
+}
+
+ads--CDockSplitter::handle {
+    background: #2a2a2a;
+    min-width: 3px;
+    min-height: 3px;
+}
+
+ads--CDockSplitter::handle:hover {
+    background: #6b8cff;
+}
+
+/* 浮动窗口容器 */
+ads--CFloatingDockContainer {
+    background: #121212;
+    border: 1px solid #3a3a3a;
+}
+
+/* 拖拽预览覆盖层 */
+ads--CDockOverlay {
+    background: rgba(107, 140, 255, 0.15);
+}
+
+ads--CDockOverlayCross {
+    background: rgba(107, 140, 255, 0.3);
+}
+
+/* 标签页关闭图标 — 缩小 */
+#tabCloseIcon {
+    background: transparent;
+    max-width: 12px;
+    max-height: 12px;
+}
+"""
