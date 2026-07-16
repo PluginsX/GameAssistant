@@ -31,7 +31,7 @@ import time
 
 from PyQt5.QtCore import Qt, QPoint, QTimer
 from PyQt5.QtGui import (
-    QCursor, QFont, QImage, QTextCursor,
+    QColor, QCursor, QFont, QImage, QTextCursor,
 )
 from PyQt5.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDoubleSpinBox,
@@ -659,7 +659,7 @@ class MainWindow(QMainWindow):
         self._dock_preview.setWidget(self._preview_container)
         self._dock_preview.setObjectName("dockPreview")
 
-        # ── 运行日志 Dock（初始隐藏） ──────────────────────────
+        # ── 运行日志 Dock ────────────────────────────────────
         self._log_panel = self._build_log_panel()
         self._dock_log = ads.CDockWidget("运行日志")
         self._dock_log.setWidget(self._log_panel)
@@ -668,6 +668,7 @@ class MainWindow(QMainWindow):
         # ── 添加到停靠管理器 ──────────────────────────────────
         # 默认布局：任务管理(左上) | 动作列表(中) | 属性(右)
         #         动作库(左下)
+        #         运行日志(底部，跨全宽)
         self._dock_manager.addDockWidget(ads.LeftDockWidgetArea, self._dock_left)
         self._dock_manager.addDockWidget(
             ads.RightDockWidgetArea, self._dock_center, self._dock_left.dockAreaWidget()
@@ -680,10 +681,13 @@ class MainWindow(QMainWindow):
         self._dock_manager.addDockWidget(
             ads.BottomDockWidgetArea, self._dock_action_lib, self._dock_left.dockAreaWidget()
         )
+        # 运行日志停靠在整个中央区域的底部（跨全宽）
+        self._dock_manager.addDockWidget(
+            ads.BottomDockWidgetArea, self._dock_log, self._dock_center.dockAreaWidget()
+        )
 
-        # 预览和日志初始隐藏
+        # 预览初始隐藏
         self._dock_preview.closeDockWidget()
-        self._dock_log.closeDockWidget()
 
         # ── 保存默认布局视角 ──────────────────────────────────
         self._dock_manager.addPerspective("Default")
@@ -1206,8 +1210,11 @@ class MainWindow(QMainWindow):
     def _on_worker_log(self, message: str, level: str):
         """处理 worker 发来的日志消息。"""
         self._status_log.setText(message)
-        if hasattr(self, "log_text") and self.log_text.isVisible():
+        if hasattr(self, "log_text") and self.log_text is not None:
+            color = LEVEL_COLORS.get(level.upper(), "#e0e0e0")
+            self.log_text.setTextColor(QColor(color))
             self.log_text.append(message)
+            self.log_text.setTextColor(QColor("#e0e0e0"))
 
     def _on_worker_status(self, status: str):
         """处理 worker 发来的状态变化。"""
@@ -2584,7 +2591,7 @@ class MainWindow(QMainWindow):
 
         self._log_expand_btn = QPushButton("📋")
         self._log_expand_btn.setFixedSize(24, 24)
-        self._log_expand_btn.setToolTip("展开日志面板")
+        self._log_expand_btn.setToolTip("显示/隐藏日志窗口")
         self._log_expand_btn.setStyleSheet(
             "QPushButton { background: transparent; color: #808080; border: none; "
             "border-radius: 4px; font-size: 12px; } "
@@ -2598,30 +2605,26 @@ class MainWindow(QMainWindow):
         return bar
 
     def _build_log_panel(self):
-        """构建展开式日志面板（由 _toggle_log_panel 控制显隐）。"""
-        panel = QFrame()
-        panel.setObjectName("logPanel")
-        panel.setVisible(False)
-        panel.setStyleSheet(
-            "QFrame#logPanel { background: #111; border-top: 1px solid #2a2a2a; }"
-        )
-        log_layout = QVBoxLayout(panel)
-        log_layout.setContentsMargins(0, 0, 0, 0)
+        """构建日志面板（作为 ADS Dock Widget 的内容）。
+
+        支持自由停靠、悬浮、与其他面板合并为标签页，
+        不受固定高度限制，完全融入停靠系统布局。
+        """
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(4)
+
         self.log_text = QTextEdit()
         self.log_text.setReadOnly(True)
-        self.log_text.setMinimumHeight(150)
-        self.log_text.setMaximumHeight(300)
         self.log_text.setStyleSheet(
-            "QTextEdit { background: #111; color: #c0c0c0; border: none; "
-            "font-size: 11px; font-family: Consolas, monospace; }"
+            "QTextEdit { background: #111; color: #c0c0c0; "
+            "border: 1px solid #2a2a2a; border-radius: 4px; "
+            "font-size: 11px; font-family: Consolas, monospace; "
+            "padding: 4px; }"
         )
-        log_layout.addWidget(self.log_text)
-        return panel
-
-    def __init_log_panel(self, root_layout):
-        """在 __init__ 中调用，将日志面板插入到状态栏之后。"""
-        self._log_panel = self._build_log_panel()
-        root_layout.addWidget(self._log_panel)
+        layout.addWidget(self.log_text, 1)
+        return widget
 
     def _toggle_log_panel(self):
         """切换日志面板的显示（通过 ADS Dock 可见性）。"""
