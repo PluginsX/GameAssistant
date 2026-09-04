@@ -246,12 +246,14 @@ class Task:
             顺序任务：按列表顺序循环执行。
             独立任务：自我循环执行，与顺序任务及其他独立任务同步运行。
         repeat: 重复次数（1=执行1次，3=执行3次）
+        repeat_interval_ms: 每轮重复之间的间隔时间（毫秒），默认 0
         events: 事件列表
     """
     name: str = "新任务"
     enabled: bool = True
     task_type: str = "sequential"
     repeat: int = 1
+    repeat_interval_ms: int = 0
     events: list[TaskEvent] = field(default_factory=list)
     min_action_interval: int = 200
     min_action_interval_random: bool = False
@@ -264,6 +266,7 @@ class Task:
             "enabled": self.enabled,
             "task_type": self.task_type,
             "repeat": self.repeat,
+            "repeat_interval_ms": self.repeat_interval_ms,
             "events": [e.to_dict() for e in self.events],
             "min_action_interval": self.min_action_interval,
             "min_action_interval_random": self.min_action_interval_random,
@@ -315,6 +318,9 @@ class Task:
         repeat_raw = d.get("repeat", 1)
         repeat = _clamp(int(repeat_raw), 1, 999) if isinstance(repeat_raw, (int, float)) else 1
 
+        repeat_interval_raw = d.get("repeat_interval_ms", 0)
+        repeat_interval_ms = _clamp(int(repeat_interval_raw), 0, 99999999) if isinstance(repeat_interval_raw, (int, float)) else 0
+
         def _safe_int_task(val, default):
             return _clamp(int(val), 0, 99999) if isinstance(val, (int, float)) else default
 
@@ -343,6 +349,7 @@ class Task:
             enabled=bool(d.get("enabled", True)),
             task_type=task_type,
             repeat=repeat,
+            repeat_interval_ms=repeat_interval_ms,
             events=valid_events,
             min_action_interval=min_action_interval,
             min_action_interval_random=min_action_interval_random,

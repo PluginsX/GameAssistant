@@ -329,12 +329,17 @@ class SanguoBot:
             state["repeat_idx"] += 1
             if state["repeat_idx"] >= task.repeat:
                 state["repeat_idx"] = 0
+                if task.repeat_interval_ms > 0:
+                    state["wait_until"] = time.time() + task.repeat_interval_ms / 1000.0
                 if prefix:
                     logger.info("%s任务 '%s' 一轮完成，继续循环", prefix, task.name)
                 else:
                     logger.info("任务 '%s' 执行完成（共 %d 轮）", task.name, task.repeat)
                 return True
             else:
+                if task.repeat_interval_ms > 0:
+                    state["wait_until"] = time.time() + task.repeat_interval_ms / 1000.0
+                    logger.debug("重复间隔等待 %dms", task.repeat_interval_ms)
                 if not prefix:
                     logger.info("执行任务: %s (轮次 %d/%d)",
                                 task.name, state["repeat_idx"] + 1, task.repeat)

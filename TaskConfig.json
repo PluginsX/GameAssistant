@@ -109,12 +109,28 @@
         },
         {
           "type": "wait",
-          "ms": 1000
+          "ms": 2000
         },
         {
           "type": "keyup",
           "keys": [
             "Right"
+          ]
+        },
+        {
+          "type": "keydown",
+          "keys": [
+            "Left"
+          ]
+        },
+        {
+          "type": "wait",
+          "ms": 1000
+        },
+        {
+          "type": "keyup",
+          "keys": [
+            "Left"
           ]
         }
       ],
@@ -125,7 +141,7 @@
     },
     {
       "name": "R",
-      "enabled": false,
+      "enabled": true,
       "task_type": "independent",
       "repeat": 1,
       "events": [
@@ -143,7 +159,7 @@
     },
     {
       "name": "T",
-      "enabled": false,
+      "enabled": true,
       "task_type": "independent",
       "repeat": 1,
       "events": [

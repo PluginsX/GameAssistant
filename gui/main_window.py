@@ -1304,6 +1304,9 @@ class MainWindow(QMainWindow):
             self.repeat_spin.blockSignals(True)
             self.repeat_spin.setValue(task.repeat)
             self.repeat_spin.blockSignals(False)
+            self.repeat_interval_spin.blockSignals(True)
+            self.repeat_interval_spin.setValue(task.repeat_interval_ms)
+            self.repeat_interval_spin.blockSignals(False)
             self.min_interval_spin.blockSignals(True)
             self.min_interval_spin.setValue(task.min_action_interval)
             self.min_interval_spin.blockSignals(False)
@@ -1434,6 +1437,18 @@ class MainWindow(QMainWindow):
         row = lst.currentRow()
         if 0 <= row < len(tasks):
             tasks[row].repeat = value
+
+    def _on_repeat_interval_changed(self, value: int):
+        """重复间隔时间变化。"""
+        if self._task_queue is None:
+            return
+        tab = self._task_tab.currentIndex()
+        task_type = "sequential" if tab == 0 else "independent"
+        lst = self.seq_task_list if tab == 0 else self.ind_task_list
+        tasks = self._tasks_of_type(task_type)
+        row = lst.currentRow()
+        if 0 <= row < len(tasks):
+            tasks[row].repeat_interval_ms = value
 
     def _on_min_interval_changed(self, value: int):
         """最小动作间隔变化。"""
@@ -2128,6 +2143,16 @@ class MainWindow(QMainWindow):
         self.repeat_spin.valueChanged.connect(self._on_repeat_changed)
         repeat_row.addRow("重复:", self.repeat_spin)
         prop_layout.addLayout(repeat_row)
+
+        repeat_interval_row = QFormLayout()
+        repeat_interval_row.setFieldGrowthPolicy(QFormLayout.AllNonFixedFieldsGrow)
+        self.repeat_interval_spin = QSpinBox()
+        self.repeat_interval_spin.setRange(0, 99999999)
+        self.repeat_interval_spin.setSuffix(" ms")
+        self.repeat_interval_spin.setToolTip("每轮重复之间的间隔时间，0 表示无间隔")
+        self.repeat_interval_spin.valueChanged.connect(self._on_repeat_interval_changed)
+        repeat_interval_row.addRow("重复间隔:", self.repeat_interval_spin)
+        prop_layout.addLayout(repeat_interval_row)
 
         task_layout.addWidget(prop_frame)
 
