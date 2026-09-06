@@ -790,26 +790,39 @@ class MainWindow(QMainWindow):
             if tab_bar:
                 tab_bar.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
                 tab_bar.setFixedHeight(16)
-                # 让 tab 扩展填满 tab bar，消除右侧黑色空白
+                # tab 缩短后视口/内部容器会露出 QTabBar 默认浅色底，显式压成深色
+                vp = tab_bar.viewport()
+                if vp is not None:
+                    vp.setStyleSheet("background: #1a1a1a;")
+                # 标签页按标题文字自适应宽度，剩余空间由 spacer 填充
                 inner = _find_inner_content_widget(tab_bar)
+                if inner:
+                    inner.setStyleSheet("background: #1a1a1a;")
                 if inner and inner.layout():
                     lyt = inner.layout()
-                    # item 0 = tab, item 1 = spacer
-                    # 把 tab 的 stretch 设为 1，spacer 设为 0，tab 就会扩展填满
-                    if lyt.count() >= 2:
-                        lyt.setStretch(0, 1)
-                        lyt.setStretch(1, 0)
-            # 标签页 + 文字标签优化
-            tab = _find_by_classname(tb, 'DockWidgetTab')
-            if tab and tab.layout():
-                # 减少左边距（默认 10px），左右各留 4px
-                tab.layout().setContentsMargins(4, 0, 4, 0)
+                    for i in range(lyt.count()):
+                        w = lyt.itemAt(i).widget()
+                        cname = (w.metaObject().className()
+                                 if (w is not None and hasattr(w, 'metaObject')) else "")
+                        if 'DockWidgetTab' in cname:
+                            w.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+                            lyt.setStretch(i, 0)
+                        else:
+                            # spacer 或其他占位项扩展填满
+                            lyt.setStretch(i, 1)
+            # 标签页 + 文字标签优化（多标签区域逐个处理）
+            for tab in _find_all_by_classname(tb, 'DockWidgetTab'):
+                if tab.layout():
+                    # 减少左边距（默认 10px），左右各留 4px
+                    tab.layout().setContentsMargins(4, 0, 4, 0)
                 tab.setFixedHeight(14)
-            label = _find_by_classname(tb, 'ElidingLabel')
-            if label:
-                # 增加 6px 余量，防止 CElidingLabel 误裁文字边缘
-                label.setMinimumWidth(label.sizeHint().width() + 6)
-                label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+                tab.setSizePolicy(QSizePolicy.Maximum, QSizePolicy.Fixed)
+            for label in _find_all_by_classname(tb, 'ElidingLabel'):
+                # 宽度跟随标题文字内容，保留少量余量防止边缘误裁
+                hint = label.sizeHint().width() + 4
+                label.setMinimumWidth(hint)
+                label.setMaximumWidth(hint)
+                label.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
             # 更新标题栏按钮尺寸与图标颜色
             _update_title_bar_buttons(tb)
 
