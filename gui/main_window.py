@@ -29,7 +29,7 @@ import os
 import sys
 import time
 
-from PyQt5.QtCore import Qt, QPoint, QTimer
+from PyQt5.QtCore import Qt, QPoint, QTimer, QEvent
 from PyQt5.QtGui import (
     QColor, QCursor, QFont, QImage, QTextCursor,
 )
@@ -39,7 +39,7 @@ from PyQt5.QtWidgets import (
     QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox,
     QPushButton, QScrollArea, QSpinBox, QSplitter, QStackedWidget,
     QTextEdit, QVBoxLayout, QWidget, QInputDialog, QToolButton,
-    QTabWidget, QSizePolicy, QDialog,
+    QTabWidget, QTabBar, QSizePolicy, QDialog,
 )
 
 import win32gui
@@ -772,23 +772,24 @@ class MainWindow(QMainWindow):
             return new_icon
 
         def _update_title_bar_buttons(tb):
-            """更新标题栏按钮的图标颜色为浅灰色。"""
+            """更新标题栏按钮：缩小尺寸、图标改浅灰色。"""
+            from PyQt5.QtCore import QSize
             buttons = _find_all_by_classname(tb, 'TitleBarButton')
             for btn in buttons:
+                btn.setFixedSize(12, 12)
+                btn.setIconSize(QSize(9, 9))
                 if hasattr(btn, 'icon') and hasattr(btn, 'setIcon'):
                     current_icon = btn.icon()
                     if not current_icon.isNull():
                         btn.setIcon(_recolor_icon(current_icon, _light_gray))
-                    btn.setIconSize(ICON_SIZE)
 
-        def _optimize_area(area):
-            tb = _find_by_classname(area, 'TitleBar')
-            if not tb:
-                return
-            # 标签栏扩展占满
+        def _optimize_title_bar(tb):
+            """对单个标题栏控件应用紧凑化优化（区域/浮动窗口共用）。"""
+            # 标签栏扩展占满 + 固定紧凑高度
             tab_bar = _find_by_classname(tb, 'DockAreaTabBar')
             if tab_bar:
                 tab_bar.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+                tab_bar.setFixedHeight(16)
                 # 让 tab 扩展填满 tab bar，消除右侧黑色空白
                 inner = _find_inner_content_widget(tab_bar)
                 if inner and inner.layout():
@@ -803,13 +804,20 @@ class MainWindow(QMainWindow):
             if tab and tab.layout():
                 # 减少左边距（默认 10px），左右各留 4px
                 tab.layout().setContentsMargins(4, 0, 4, 0)
+                tab.setFixedHeight(14)
             label = _find_by_classname(tb, 'ElidingLabel')
             if label:
                 # 增加 6px 余量，防止 CElidingLabel 误裁文字边缘
                 label.setMinimumWidth(label.sizeHint().width() + 6)
                 label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-            # 更新标题栏按钮图标颜色
+            # 更新标题栏按钮尺寸与图标颜色
             _update_title_bar_buttons(tb)
+
+        def _optimize_area(area):
+            tb = _find_by_classname(area, 'TitleBar')
+            if not tb:
+                return
+            _optimize_title_bar(tb)
 
         self._optimized_areas = set()
         for i in range(self._dock_manager.dockAreaCount()):
@@ -833,12 +841,12 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(0, lambda: _optimize_floating_widget(widget))
 
         def _optimize_floating_widget(fw):
-            """优化浮动窗口的标题栏。"""
+            """优化浮动窗口的标题栏（尺寸与颜色）。"""
             if fw is None:
                 return
             tb = _find_by_classname(fw, 'TitleBar')
             if tb:
-                _update_title_bar_buttons(tb)
+                _optimize_title_bar(tb)
 
         # 尝试连接浮动窗口创建信号（不同版本 ADS 信号名可能不同）
         if hasattr(self._dock_manager, 'floatingWidgetCreated'):

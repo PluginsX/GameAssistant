@@ -122,23 +122,33 @@ ads--CDockAreaTabBar {
     background: #1a1a1a;
     border-bottom: 1px solid #2a2a2a;
     padding: 0px;
-    max-height: 26px;
-    min-height: 26px;
+    max-height: 16px;
+    min-height: 16px;
+}
+
+/* QTabBar 内部 tab 子控件 — 决定标签栏实际高度，必须显式压缩 */
+ads--CDockAreaTabBar::tab {
+    background: transparent;
+    border: none;
+    padding: 0px;
+    margin: 0px;
+    min-height: 14px;
+    max-height: 14px;
 }
 
 /* 停靠标签页 — 紧凑高度 + 紧凑内边距 */
 ads--CDockWidgetTab {
     background: #2a2a2a;
     color: #a0a0a0;
-    padding: 2px 6px;
+    padding: 1px 5px;
     border: 1px solid #3a3a3a;
     border-bottom: none;
     border-radius: 3px 3px 0 0;
     margin-right: 1px;
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 500;
-    max-height: 24px;
-    min-height: 24px;
+    max-height: 14px;
+    min-height: 14px;
 }
 
 ads--CDockWidgetTab[activeTab="true"] {
@@ -152,13 +162,13 @@ ads--CDockWidgetTab:hover {
     color: #d0d0d0;
 }
 
-/* 区域标题栏 — 紧凑高度 24px */
+/* 区域标题栏 — 紧凑高度 16px */
 ads--CDockAreaTitleBar {
     background: #1a1a1a;
     border-bottom: 1px solid #2a2a2a;
-    padding: 0px 4px;
-    max-height: 24px;
-    min-height: 24px;
+    padding: 0px 2px;
+    max-height: 16px;
+    min-height: 16px;
 }
 
 /* 标题栏按钮 — 缩小 + 浅灰色图标 */
@@ -167,10 +177,10 @@ ads--CTitleBarButton {
     border: none;
     border-radius: 2px;
     padding: 0px;
-    max-width: 18px;
-    max-height: 18px;
-    min-width: 18px;
-    min-height: 18px;
+    max-width: 12px;
+    max-height: 12px;
+    min-width: 12px;
+    min-height: 12px;
     color: #c8c8c8;
 }
 
@@ -186,8 +196,8 @@ ads--CTitleBarButton#CloseButton:hover {
 ads--CElidingLabel {
     color: #a0a0a0;
     background: transparent;
-    font-size: 11px;
-    padding: 0px 4px;
+    font-size: 10px;
+    padding: 0px 2px;
 }
 
 /* 分割器 */
@@ -223,7 +233,7 @@ ads--CDockOverlayCross {
 /* 标签页关闭图标 — 缩小 */
 #tabCloseIcon {
     background: transparent;
-    max-width: 12px;
-    max-height: 12px;
+    max-width: 9px;
+    max-height: 9px;
 }
 """

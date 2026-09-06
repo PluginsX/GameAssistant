@@ -8,6 +8,7 @@
       "enabled": false,
       "task_type": "independent",
       "repeat": 1,
+      "repeat_interval_ms": 0,
       "events": [
         {
           "type": "keyclick",
@@ -26,6 +27,7 @@
       "enabled": true,
       "task_type": "sequential",
       "repeat": 5,
+      "repeat_interval_ms": 0,
       "events": [
         {
           "type": "keyclick",
@@ -80,6 +82,7 @@
       "enabled": true,
       "task_type": "sequential",
       "repeat": 1,
+      "repeat_interval_ms": 0,
       "events": [
         {
           "type": "keydown",
@@ -144,6 +147,7 @@
       "enabled": true,
       "task_type": "independent",
       "repeat": 1,
+      "repeat_interval_ms": 0,
       "events": [
         {
           "type": "keyclick",
@@ -162,6 +166,7 @@
       "enabled": true,
       "task_type": "independent",
       "repeat": 1,
+      "repeat_interval_ms": 0,
       "events": [
         {
           "type": "keyclick",

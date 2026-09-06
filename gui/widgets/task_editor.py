@@ -26,17 +26,28 @@ class _TaskBlockWidget(QWidget):
         layout.setSpacing(4)
         handle = QLabel("\u22EE\u22EE")
         handle.setStyleSheet(
-            f"color: {event.get_color()}; font-size: 14px; font-weight: 900;"
+            f"background: transparent; color: {event.get_color()}; "
+            "font-size: 14px; font-weight: 900;"
         )
         handle.setFixedWidth(18)
         handle.setCursor(Qt.SizeAllCursor)
         layout.addWidget(handle)
 
-        text_label = QLabel(event.get_display_text())
-        text_label.setStyleSheet(
-            "color: #e8e8e8; font-size: 14px; font-weight: 500;"
+        self.enable_check = QCheckBox()
+        self.enable_check.setChecked(event.enabled)
+        self.enable_check.setFixedSize(22, 22)
+        self.enable_check.setContentsMargins(0, 0, 0, 0)
+        self.enable_check.setCursor(Qt.PointingHandCursor)
+        self.enable_check.setToolTip("启用/禁用该动作（禁用后执行时跳过）")
+        self.enable_check.setStyleSheet(
+            "QCheckBox { background: transparent; padding: 0; margin: 0; }"
         )
-        layout.addWidget(text_label)
+        self.enable_check.stateChanged.connect(self._on_enable_toggled)
+        layout.addWidget(self.enable_check)
+
+        self.text_label = QLabel(event.get_display_text())
+        self._update_text_style()
+        layout.addWidget(self.text_label)
         layout.addStretch()
 
         up_btn = QPushButton("\u25B2")
@@ -74,6 +85,23 @@ class _TaskBlockWidget(QWidget):
     def _on_delete(self):
         if self._parent_list:
             self._parent_list._delete_event(self.index)
+
+    def _on_enable_toggled(self, state: int):
+        self.event.enabled = (state == Qt.Checked)
+        self._update_text_style()
+
+    def _update_text_style(self):
+        if self.event.enabled:
+            self.text_label.setStyleSheet(
+                "background: transparent; color: #e8e8e8; "
+                "font-size: 14px; font-weight: 500;"
+            )
+        else:
+            self.text_label.setStyleSheet(
+                "background: transparent; color: #666666; "
+                "font-size: 14px; font-weight: 500; "
+                "text-decoration: line-through;"
+            )
 
     def _on_move_up(self):
         if self._parent_list and self.index > 0:
@@ -282,20 +310,25 @@ class TaskItemWidget(QWidget):
 
         self.checkbox = QCheckBox()
         self.checkbox.setChecked(task.enabled)
-        self.checkbox.stateChanged.connect(self._on_toggled)
+        self.checkbox.setFixedSize(22, 22)
+        self.checkbox.setContentsMargins(0, 0, 0, 0)
         self.checkbox.setCursor(Qt.PointingHandCursor)
+        self.checkbox.setStyleSheet(
+            "QCheckBox { background: transparent; padding: 0; margin: 0; }"
+        )
+        self.checkbox.stateChanged.connect(self._on_toggled)
         layout.addWidget(self.checkbox)
 
         name_label = QLabel(task.name)
         name_label.setStyleSheet(
-            "color: #e8e8e8; font-size: 14px; font-weight: 500;"
+            "background: transparent; color: #e8e8e8; font-size: 14px; font-weight: 500;"
         )
         name_label.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         layout.addWidget(name_label)
 
         if task.repeat > 1:
             repeat_label = QLabel(f"\u00D7{task.repeat}")
-            repeat_label.setStyleSheet("color: #808080; font-size: 12px;")
+            repeat_label.setStyleSheet("background: transparent; color: #808080; font-size: 12px;")
             repeat_label.setAttribute(Qt.WA_TransparentForMouseEvents, True)
             layout.addWidget(repeat_label)
 

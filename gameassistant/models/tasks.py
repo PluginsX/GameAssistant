@@ -52,6 +52,7 @@ class TaskEvent:
         min_ms: 最小等待毫秒，仅 wait_random 使用
         max_ms: 最大等待毫秒，仅 wait_random 使用
         comment: 备注信息（可选，不影响执行）
+        enabled: 是否启用该动作（禁用后执行时跳过，默认启用）
     """
     type: str = "keyclick"
     key: str = ""
@@ -60,6 +61,7 @@ class TaskEvent:
     min_ms: int = 100
     max_ms: int = 300
     comment: str = ""
+    enabled: bool = True
 
     @property
     def vk_code(self) -> int:
@@ -102,6 +104,8 @@ class TaskEvent:
             d["max"] = self.max_ms
         if self.comment:
             d["comment"] = self.comment
+        if not self.enabled:
+            d["enabled"] = False
         return d
 
     @classmethod
@@ -167,6 +171,8 @@ class TaskEvent:
         if not isinstance(event_type, str) or event_type not in VALID_EVENT_TYPES:
             event_type = "keyclick"
 
+        enabled = bool(d.get("enabled", True))
+
         # 处理按键事件
         if event_type in ("keydown", "keyup", "keyclick"):
             keys_raw = d.get("keys", [])
@@ -183,6 +189,7 @@ class TaskEvent:
                 key=single_key,
                 keys=valid_keys,
                 comment=str(d.get("comment", "")) if d.get("comment") else "",
+                enabled=enabled,
             )
 
         # 处理等待事件
@@ -193,6 +200,7 @@ class TaskEvent:
                 type="wait",
                 ms=ms,
                 comment=str(d.get("comment", "")) if d.get("comment") else "",
+                enabled=enabled,
             )
 
         if event_type == "wait_random":
@@ -205,9 +213,10 @@ class TaskEvent:
                 min_ms=min(min_ms, max_ms),
                 max_ms=max(min_ms, max_ms),
                 comment=str(d.get("comment", "")) if d.get("comment") else "",
+                enabled=enabled,
             )
 
-        return cls(type=event_type)
+        return cls(type=event_type, enabled=enabled)
 
     def get_display_text(self) -> str:
         """返回用于 UI 显示的简短文本。"""

@@ -292,7 +292,9 @@ class SanguoBot:
 
         event = events[state["event_idx"]]
 
-        if not self.task_queue.is_event_blocked(event):
+        if not event.enabled:
+            logger.debug("%s跳过禁用动作: %s", prefix, event.get_display_text())
+        elif not self.task_queue.is_event_blocked(event):
             etype = event.type
             if etype == "keydown":
                 vk_codes = event.vk_codes
